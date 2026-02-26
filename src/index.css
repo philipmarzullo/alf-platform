@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --color-aa-blue: #009ADE;
+  --color-aa-red: #E12F2C;
+  --color-dark-text: #272727;
+  --color-secondary-text: #5A5D62;
+  --color-light-bg: #F5F5F5;
+  --color-dark-nav: #1B2133;
+  --color-dark-nav-warm: #231A12;
+  --color-dept-hr: #009ADE;
+  --color-dept-finance: #0D9488;
+  --color-dept-purchasing: #7C3AED;
+  --color-dept-ops: #4B5563;
+  --color-status-green: #16A34A;
+  --color-status-yellow: #EAB308;
+  --color-status-red: #DC2626;
+  --color-status-blue: #009ADE;
+  --color-status-gray: #9CA3AF;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--color-dark-text);
+  background: var(--color-light-bg);
+  margin: 0;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
