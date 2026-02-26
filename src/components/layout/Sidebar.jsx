@@ -5,13 +5,12 @@ import { useUser } from '../../contexts/UserContext';
 import useMediaQuery from '../../hooks/useMediaQuery';
 import { NAV_ITEMS } from '../../data/constants';
 import {
-  LayoutDashboard, Building2, Activity, Bot, Settings,
-  FileText, Palette, Menu, X, LogOut,
+  LayoutDashboard, Building2, Activity, Settings,
+  Menu, X, LogOut,
 } from 'lucide-react';
 
 const ICON_MAP = {
-  LayoutDashboard, Building2, Activity, Bot, Settings,
-  FileText, Palette,
+  LayoutDashboard, Building2, Activity, Settings,
 };
 
 export default function Sidebar() {

@@ -6,10 +6,7 @@ const BREADCRUMB_MAP = {
   '/platform/tenants': ['Tenants'],
   '/platform/tenants/new': ['Tenants', 'New Tenant'],
   '/platform/usage': ['Usage'],
-  '/platform/config': ['Configuration'],
-  '/platform/agents': ['Agents'],
-  '/platform/templates': ['Templates'],
-  '/platform/brand': ['Brand'],
+  '/platform/settings': ['Settings'],
 };
 
 export default function TopBar() {

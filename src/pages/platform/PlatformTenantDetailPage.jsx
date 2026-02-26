@@ -5,7 +5,7 @@ import {
   Puzzle, Bot, Lock, ToggleLeft, ToggleRight,
   ChevronDown, ChevronRight, FileText, Zap, BookOpen,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical,
-  Plus, Mail, UserX, UserCheck,
+  Plus, Mail, UserX, UserCheck, Palette,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
@@ -32,6 +32,7 @@ const TABS = [
   { key: 'features', label: 'Features', icon: Puzzle },
   { key: 'agents', label: 'Agents', icon: Bot },
   { key: 'api-keys', label: 'API Keys', icon: Lock },
+  { key: 'brand', label: 'Brand', icon: Palette },
 ];
 
 // Which agents each module unlocks
@@ -71,6 +72,15 @@ export default function PlatformTenantDetailPage() {
   const [editPlan, setEditPlan] = useState('');
   const [editStatus, setEditStatus] = useState('');
 
+  // Brand tab state
+  const [editBrand, setEditBrand] = useState({
+    brand_display_name: '',
+    brand_logo_url: '',
+    brand_primary_color: '#009ADE',
+    brand_sidebar_bg: '#1B2133',
+  });
+  const [savingBrand, setSavingBrand] = useState(false);
+
   useEffect(() => {
     loadData();
   }, [id]);
@@ -101,6 +111,12 @@ export default function PlatformTenantDetailPage() {
     setEditName(t.company_name);
     setEditPlan(t.plan || 'free');
     setEditStatus(t.status || 'active');
+    setEditBrand({
+      brand_display_name: t.brand_display_name || '',
+      brand_logo_url: t.brand_logo_url || '',
+      brand_primary_color: t.brand_primary_color || '#009ADE',
+      brand_sidebar_bg: t.brand_sidebar_bg || '#1B2133',
+    });
     setUsers(usersRes.data || []);
     setSites(sitesRes.data || []);
     setUsage(usageRes.data || []);
@@ -187,6 +203,26 @@ export default function PlatformTenantDetailPage() {
       }
     }
     setSavingOverride(null);
+  }
+
+  async function handleSaveBrand() {
+    setSavingBrand(true);
+    setError(null);
+    setSaved(false);
+
+    const { error: updateErr } = await supabase
+      .from('alf_tenants')
+      .update(editBrand)
+      .eq('id', id);
+
+    if (updateErr) {
+      setError(updateErr.message);
+    } else {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      setTenant((prev) => ({ ...prev, ...editBrand }));
+    }
+    setSavingBrand(false);
   }
 
   async function handleCreateUser() {
@@ -619,6 +655,16 @@ export default function PlatformTenantDetailPage() {
       {activeTab === 'api-keys' && (
         <ApiKeysTab tenantId={id} />
       )}
+
+      {/* Brand Tab */}
+      {activeTab === 'brand' && (
+        <BrandTab
+          editBrand={editBrand}
+          setEditBrand={setEditBrand}
+          saving={savingBrand}
+          onSave={handleSaveBrand}
+        />
+      )}
     </div>
   );
 }
@@ -861,6 +907,128 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Brand Tab ─── */
+
+function BrandTab({ editBrand, setEditBrand, saving, onSave }) {
+  function update(key, value) {
+    setEditBrand((prev) => ({ ...prev, [key]: value }));
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-dark-text">Tenant Branding</h2>
+          <p className="text-sm text-secondary-text mt-1">
+            Configure how this tenant's portal looks. Changes apply when the tenant portal reads these values.
+          </p>
+        </div>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+        >
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+          {saving ? 'Saving...' : 'Save Brand'}
+        </button>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
+        {/* Display Name */}
+        <div className="p-5 flex flex-col md:flex-row md:items-center gap-2 md:gap-8">
+          <div className="md:w-1/3">
+            <div className="text-sm font-medium text-dark-text">Display Name</div>
+            <div className="text-xs text-secondary-text mt-0.5">Overrides company name in the tenant portal header</div>
+          </div>
+          <div className="flex-1">
+            <input
+              type="text"
+              value={editBrand.brand_display_name}
+              onChange={(e) => update('brand_display_name', e.target.value)}
+              placeholder="e.g., A&A Portal"
+              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            />
+          </div>
+        </div>
+
+        {/* Logo URL */}
+        <div className="p-5 flex flex-col md:flex-row md:items-start gap-2 md:gap-8">
+          <div className="md:w-1/3">
+            <div className="text-sm font-medium text-dark-text">Logo URL</div>
+            <div className="text-xs text-secondary-text mt-0.5">Full URL to the tenant's logo image</div>
+          </div>
+          <div className="flex-1 space-y-3">
+            <input
+              type="text"
+              value={editBrand.brand_logo_url}
+              onChange={(e) => update('brand_logo_url', e.target.value)}
+              placeholder="https://example.com/logo.png"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            />
+            {editBrand.brand_logo_url && (
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <img
+                  src={editBrand.brand_logo_url}
+                  alt="Logo preview"
+                  className="h-10 max-w-[160px] object-contain"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <span className="text-xs text-secondary-text">Preview</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Primary Color */}
+        <div className="p-5 flex flex-col md:flex-row md:items-center gap-2 md:gap-8">
+          <div className="md:w-1/3">
+            <div className="text-sm font-medium text-dark-text">Primary Color</div>
+            <div className="text-xs text-secondary-text mt-0.5">Buttons, links, and accents in the tenant portal</div>
+          </div>
+          <div className="flex-1 flex items-center gap-3">
+            <input
+              type="color"
+              value={editBrand.brand_primary_color}
+              onChange={(e) => update('brand_primary_color', e.target.value)}
+              className="w-10 h-10 rounded-lg border border-gray-200 cursor-pointer p-0.5"
+            />
+            <input
+              type="text"
+              value={editBrand.brand_primary_color}
+              onChange={(e) => update('brand_primary_color', e.target.value)}
+              className="w-32 px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              placeholder="#009ADE"
+            />
+          </div>
+        </div>
+
+        {/* Sidebar Background */}
+        <div className="p-5 flex flex-col md:flex-row md:items-center gap-2 md:gap-8">
+          <div className="md:w-1/3">
+            <div className="text-sm font-medium text-dark-text">Sidebar Background</div>
+            <div className="text-xs text-secondary-text mt-0.5">Dark sidebar color in the tenant portal</div>
+          </div>
+          <div className="flex-1 flex items-center gap-3">
+            <input
+              type="color"
+              value={editBrand.brand_sidebar_bg}
+              onChange={(e) => update('brand_sidebar_bg', e.target.value)}
+              className="w-10 h-10 rounded-lg border border-gray-200 cursor-pointer p-0.5"
+            />
+            <input
+              type="text"
+              value={editBrand.brand_sidebar_bg}
+              onChange={(e) => update('brand_sidebar_bg', e.target.value)}
+              className="w-32 px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              placeholder="#1B2133"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

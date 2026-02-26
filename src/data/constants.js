@@ -34,10 +34,7 @@ export const NAV_ITEMS = [
       { label: 'Dashboard', path: '/', icon: 'LayoutDashboard' },
       { label: 'Tenants', path: '/platform/tenants', icon: 'Building2' },
       { label: 'Usage', path: '/platform/usage', icon: 'Activity' },
-      { label: 'Agents', path: '/platform/agents', icon: 'Bot' },
-      { label: 'Config', path: '/platform/config', icon: 'Settings' },
-      { label: 'Templates', path: '/platform/templates', icon: 'FileText' },
-      { label: 'Brand', path: '/platform/brand', icon: 'Palette' },
+      { label: 'Settings', path: '/platform/settings', icon: 'Settings' },
     ],
   },
 ];

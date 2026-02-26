@@ -13,10 +13,7 @@ import {
   PlatformTenantDetailPage,
   PlatformNewTenantPage,
   PlatformUsagePage,
-  PlatformConfigPage,
-  PlatformAgentsPage,
-  PlatformTemplatesPage,
-  PlatformBrandPage,
+  PlatformSettingsPage,
 } from './pages/platform';
 import { Loader2 } from 'lucide-react';
 
@@ -88,10 +85,12 @@ export default function App() {
           <Route path="/platform/tenants/new" element={<PlatformNewTenantPage />} />
           <Route path="/platform/tenants/:id" element={<PlatformTenantDetailPage />} />
           <Route path="/platform/usage" element={<PlatformUsagePage />} />
-          <Route path="/platform/config" element={<PlatformConfigPage />} />
-          <Route path="/platform/agents" element={<PlatformAgentsPage />} />
-          <Route path="/platform/templates" element={<PlatformTemplatesPage />} />
-          <Route path="/platform/brand" element={<PlatformBrandPage />} />
+          <Route path="/platform/settings" element={<PlatformSettingsPage />} />
+          {/* Redirects from old routes */}
+          <Route path="/platform/config" element={<Navigate to="/platform/settings" replace />} />
+          <Route path="/platform/agents" element={<Navigate to="/platform/settings" replace />} />
+          <Route path="/platform/templates" element={<Navigate to="/platform/settings" replace />} />
+          <Route path="/platform/brand" element={<Navigate to="/platform/settings" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </PlatformLayout>
