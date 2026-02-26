@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Loader2, Database, Bot, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { getAllSourceAgents } from '../../agents/registry';
-import { DEPT_COLORS, STATUS } from '../../data/constants';
+import { DEPT_COLORS } from '../../data/constants';
 
 const DEPT_LABELS = {
   hr: 'HR', finance: 'Finance', purchasing: 'Purchasing',
@@ -156,7 +156,7 @@ export default function PlatformAgentsPage() {
     const tenantOverrides = overrides.filter((o) => o.tenant_id === tenant.id);
     let activeCount = 0;
     for (const agent of tenantAgents) {
-      if (getAgentStatus(agent.key, tenant.modules, tenantOverrides) === 'active') {
+      if (getAgentStatus(agent.key, tenant.enabled_modules, tenantOverrides) === 'active') {
         activeCount++;
       }
     }
@@ -212,7 +212,7 @@ export default function PlatformAgentsPage() {
             const isExpanded = expandedTenant === tenant.id;
             const { activeCount, total } = getTenantAgentSummary(tenant);
             const tenantOverrides = overrides.filter((o) => o.tenant_id === tenant.id);
-            const statusMeta = STATUS[tenant.status] || STATUS.setup;
+            const tenantActive = tenant.is_active !== false;
 
             return (
               <div key={tenant.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -231,11 +231,10 @@ export default function PlatformAgentsPage() {
                   <span className="text-xs text-secondary-text whitespace-nowrap">
                     {activeCount} of {total} active
                   </span>
-                  <span
-                    className="ml-auto px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap shrink-0"
-                    style={{ backgroundColor: statusMeta.bg, color: statusMeta.text }}
-                  >
-                    {statusMeta.label}
+                  <span className={`ml-auto px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap shrink-0 ${
+                    tenantActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {tenantActive ? 'Active' : 'Inactive'}
                   </span>
                 </button>
 
@@ -254,7 +253,7 @@ export default function PlatformAgentsPage() {
                       <tbody>
                         {tenantAgents.map((agent) => {
                           const deptColor = DEPT_COLORS[agent.department] || '#6B7280';
-                          const status = getAgentStatus(agent.key, tenant.modules, tenantOverrides);
+                          const status = getAgentStatus(agent.key, tenant.enabled_modules, tenantOverrides);
                           const statusStyle = AGENT_STATUS_STYLES[status];
 
                           return (
