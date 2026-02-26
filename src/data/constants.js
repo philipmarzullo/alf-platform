@@ -21,6 +21,12 @@ export const DEPT_COLORS = {
   platform: '#F59E0B',
 };
 
+export const MODEL_OPTIONS = [
+  { value: 'claude-sonnet-4-5-20250514', label: 'Claude Sonnet 4.5' },
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+  { value: 'claude-opus-4-5-20250514', label: 'Claude Opus 4.5' },
+];
+
 export const STATUS = {
   active: { label: 'Active', color: '#16A34A', bg: '#DCFCE7', text: '#166534' },
   inactive: { label: 'Inactive', color: '#9CA3AF', bg: '#F3F4F6', text: '#4B5563' },
@@ -33,6 +39,7 @@ export const NAV_ITEMS = [
     items: [
       { label: 'Dashboard', path: '/', icon: 'LayoutDashboard' },
       { label: 'Tenants', path: '/platform/tenants', icon: 'Building2' },
+      { label: 'Agents', path: '/platform/agents', icon: 'Bot' },
       { label: 'Usage', path: '/platform/usage', icon: 'Activity' },
       { label: 'Settings', path: '/platform/settings', icon: 'Settings' },
     ],

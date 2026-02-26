@@ -4,6 +4,7 @@ import cors from 'cors';
 import auth from './middleware/auth.js';
 import claudeRouter from './routes/claude.js';
 import credentialsRouter from './routes/credentials.js';
+import platformCredentialsRouter from './routes/platformCredentials.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -39,6 +40,7 @@ app.get('/health', (req, res) => {
 // --- Authenticated routes ---
 app.use('/api/claude', auth, claudeRouter);
 app.use('/api/credentials', auth, credentialsRouter);
+app.use('/api/platform-credentials', auth, platformCredentialsRouter);
 
 // --- 404 ---
 app.use((req, res) => {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import rateLimit from '../middleware/rateLimit.js';
 import { getTenantApiKey } from './credentials.js';
+import { getPlatformApiKey } from './platformCredentials.js';
 
 const router = Router();
 
@@ -44,10 +45,16 @@ router.post('/', rateLimit, async (req, res) => {
     }
   }
 
-  // No tenant context at all → env fallback
+  // No tenant context → try platform DB key, then env fallback
   if (!apiKey && !effectiveTenantId) {
-    apiKey = process.env.ANTHROPIC_API_KEY;
-    keySource = 'env';
+    try {
+      apiKey = await getPlatformApiKey(req.supabase, 'anthropic');
+      keySource = 'platform_db';
+    } catch (err) { /* silent — fall through to env */ }
+    if (!apiKey) {
+      apiKey = process.env.ANTHROPIC_API_KEY;
+      keySource = 'env';
+    }
   }
 
   if (!apiKey) {

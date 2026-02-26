@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Save, Loader2, Users, MapPin, Activity,
   Puzzle, Bot, Lock, ToggleLeft, ToggleRight,
-  ChevronDown, ChevronRight, FileText, Zap, BookOpen,
+  FileText,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical,
   Plus, Mail, UserX, UserCheck, Palette,
 } from 'lucide-react';
@@ -735,27 +735,59 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule }) {
 /* ─── Agents Tab ─── */
 
 function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverride, onToggleAgent }) {
-  const [expandedAgent, setExpandedAgent] = useState(null);
+  const navigate = useNavigate();
   const tenantModules = tenant.modules || [];
+  const [expandedPrompt, setExpandedPrompt] = useState(null);
+  const [customPrompts, setCustomPrompts] = useState({});
+  const [savingPrompt, setSavingPrompt] = useState(null);
+
+  // Initialize custom prompts from overrides
+  useEffect(() => {
+    const prompts = {};
+    agentOverrides.forEach((o) => {
+      if (o.custom_prompt_additions) {
+        prompts[o.agent_key] = o.custom_prompt_additions;
+      }
+    });
+    setCustomPrompts(prompts);
+  }, [agentOverrides]);
+
+  async function handleSaveCustomPrompt(agentKey) {
+    setSavingPrompt(agentKey);
+    const override = agentOverrides.find((o) => o.agent_key === agentKey);
+    const promptText = customPrompts[agentKey] || '';
+
+    const { error } = await supabase
+      .from('tenant_agent_overrides')
+      .upsert({
+        tenant_id: tenant.id,
+        agent_key: agentKey,
+        is_enabled: override ? override.is_enabled : true,
+        custom_prompt_additions: promptText || null,
+      }, { onConflict: 'tenant_id,agent_key' });
+
+    if (error) {
+      console.error('Failed to save custom prompt:', error.message);
+    }
+    setSavingPrompt(null);
+  }
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-dark-text">Agent Configuration</h2>
+        <h2 className="text-lg font-semibold text-dark-text">Agent Assignments</h2>
         <p className="text-sm text-secondary-text mt-1">
-          View and manage agent access for this tenant. Agents require their module to be enabled.
+          Toggle agents on/off for this tenant. Edit agent definitions on the <button onClick={() => navigate('/platform/agents')} className="text-amber-600 hover:underline">Agents page</button>.
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {sourceAgents.map((agent) => {
           const requiredModule = AGENT_MODULE_MAP[agent.key];
           const moduleEnabled = requiredModule === null || tenantModules.includes(requiredModule);
           const override = agentOverrides.find((o) => o.agent_key === agent.key);
-          const dbAgent = dbAgents.find((d) => d.agent_key === agent.key);
-          const isExpanded = expandedAgent === agent.key;
+          const hasCustomPrompt = expandedPrompt === agent.key;
 
-          // Determine status
           let statusLabel, statusColor;
           if (!moduleEnabled) {
             statusLabel = 'Module Off';
@@ -769,7 +801,6 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
           }
 
           const deptColor = DEPT_COLORS[agent.department] || '#6B7280';
-          const actionKeys = agent.actions ? Object.keys(agent.actions) : [];
 
           return (
             <div
@@ -777,48 +808,42 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
               className="bg-white rounded-lg border border-gray-200 overflow-hidden"
               style={{ borderLeftColor: deptColor, borderLeftWidth: '3px' }}
             >
-              {/* Agent Header */}
-              <button
-                onClick={() => setExpandedAgent(isExpanded ? null : agent.key)}
-                className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  {isExpanded
-                    ? <ChevronDown size={16} className="text-gray-400" />
-                    : <ChevronRight size={16} className="text-gray-400" />
-                  }
-                  <div className="text-left">
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-dark-text">{agent.name}</span>
-                      {override && (
-                        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-700">
-                          Override
-                        </span>
-                      )}
-                      {dbAgent && (
-                        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-600">
-                          DB Seeded
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-secondary-text capitalize">{agent.department}</span>
-                      <span className="text-xs text-gray-300">|</span>
-                      <span className="text-xs text-secondary-text">{agent.model}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusColor}`}>
                     {statusLabel}
                   </span>
+
+                  {/* Custom prompt toggle */}
+                  <button
+                    onClick={() => setExpandedPrompt(hasCustomPrompt ? null : agent.key)}
+                    className="text-xs text-secondary-text hover:text-amber-600 transition-colors"
+                    title="Custom prompt additions"
+                  >
+                    <FileText size={14} className={override?.custom_prompt_additions ? 'text-amber-500' : ''} />
+                  </button>
+
+                  {/* Edit Agent link */}
+                  <button
+                    onClick={() => navigate(`/platform/agents/${agent.key}`)}
+                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                  >
+                    Edit Agent
+                  </button>
+
+                  {/* Toggle */}
                   {moduleEnabled && (
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleAgent(agent.key, override);
-                      }}
+                      onClick={() => onToggleAgent(agent.key, override)}
                       disabled={savingOverride === agent.key}
                       className="text-gray-500 hover:text-amber-600 transition-colors disabled:opacity-50"
                     >
@@ -832,76 +857,30 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
                     </button>
                   )}
                 </div>
-              </button>
+              </div>
 
-              {/* Expanded Details */}
-              {isExpanded && (
-                <div className="border-t border-gray-100 px-4 py-4 space-y-4 bg-gray-50/50">
-                  {/* System Prompt */}
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <FileText size={14} className="text-secondary-text" />
-                      <span className="text-xs font-semibold text-secondary-text uppercase tracking-wider">System Prompt</span>
-                    </div>
-                    <div className="bg-white border border-gray-200 rounded-lg p-3 text-xs text-gray-600 font-mono max-h-32 overflow-y-auto whitespace-pre-wrap">
-                      {agent.systemPrompt
-                        ? agent.systemPrompt.slice(0, 500) + (agent.systemPrompt.length > 500 ? '...' : '')
-                        : '— No system prompt —'}
-                    </div>
+              {/* Custom Prompt Additions (collapsible) */}
+              {hasCustomPrompt && (
+                <div className="border-t border-gray-100 px-4 py-3 bg-gray-50/50 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <FileText size={14} className="text-amber-500" />
+                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Custom Prompt Addition</span>
                   </div>
-
-                  {/* Custom Prompt Additions (if override exists) */}
-                  {override && override.custom_prompt_additions && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <FileText size={14} className="text-amber-500" />
-                        <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Custom Prompt Addition</span>
-                      </div>
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 font-mono max-h-24 overflow-y-auto whitespace-pre-wrap">
-                        {override.custom_prompt_additions}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Knowledge Modules */}
-                  {agent.knowledgeModules && agent.knowledgeModules.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <BookOpen size={14} className="text-secondary-text" />
-                        <span className="text-xs font-semibold text-secondary-text uppercase tracking-wider">Knowledge Modules</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {agent.knowledgeModules.map((km) => (
-                          <span key={km} className="px-2 py-0.5 text-xs rounded-full bg-amber-50 text-amber-700">
-                            {km}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Actions */}
-                  {actionKeys.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <Zap size={14} className="text-secondary-text" />
-                        <span className="text-xs font-semibold text-secondary-text uppercase tracking-wider">Actions ({actionKeys.length})</span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {actionKeys.map((ak) => {
-                          const action = agent.actions[ak];
-                          return (
-                            <div key={ak} className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                              <div className="text-xs font-medium text-dark-text">{action.label || ak}</div>
-                              {action.description && (
-                                <div className="text-xs text-secondary-text mt-0.5">{action.description}</div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                  <textarea
+                    value={customPrompts[agent.key] || ''}
+                    onChange={(e) => setCustomPrompts((prev) => ({ ...prev, [agent.key]: e.target.value }))}
+                    rows={3}
+                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 resize-y"
+                    placeholder="Additional instructions appended to this agent's system prompt for this tenant..."
+                  />
+                  <button
+                    onClick={() => handleSaveCustomPrompt(agent.key)}
+                    disabled={savingPrompt === agent.key}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                  >
+                    {savingPrompt === agent.key ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                    Save Custom Prompt
+                  </button>
                 </div>
               )}
             </div>

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
-  Save, Loader2, Database, CheckCircle, Plus, Mail,
-  UserX, UserCheck, Eye, EyeOff,
+  Save, Loader2, Plus, Mail, Key, Trash2, FlaskConical,
+  UserX, UserCheck, Eye, EyeOff, CheckCircle, XCircle,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
-import { getAllSourceAgents } from '../../agents/registry';
+import { MODEL_OPTIONS } from '../../data/constants';
 import DataTable from '../../components/shared/DataTable';
 
 /* ─── Config constants ─── */
@@ -15,11 +15,7 @@ const DEFAULT_CONFIG = {
   rate_limit_per_minute: 10,
 };
 
-const MODEL_OPTIONS = [
-  { value: 'claude-sonnet-4-5-20250514', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-  { value: 'claude-opus-4-5-20250514', label: 'Claude Opus 4.5' },
-];
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 /* ─── Main Page ─── */
 
@@ -28,11 +24,11 @@ export default function PlatformSettingsPage() {
     <div className="space-y-10">
       <div>
         <h1 className="text-xl font-semibold text-dark-text">Settings</h1>
-        <p className="text-sm text-secondary-text mt-1">Platform configuration, agent registry, and user management</p>
+        <p className="text-sm text-secondary-text mt-1">Platform configuration, API keys, and user management</p>
       </div>
 
       <ConfigSection />
-      <AgentRegistrySection />
+      <PlatformApiKeySection />
       <PlatformUsersSection />
     </div>
   );
@@ -172,137 +168,253 @@ function ConfigRow({ label, hint, children }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Section 2: Agent Registry
+   Section 2: Platform API Key
    ═══════════════════════════════════════════════════════════════ */
 
-function AgentRegistrySection() {
-  const [sourceAgents, setSourceAgents] = useState([]);
-  const [dbAgents, setDbAgents] = useState([]);
+async function platformCredentialFetch(path, options = {}) {
+  const token = await getFreshToken();
+  if (!token) throw new Error('Not authenticated — please sign in again');
+
+  const res = await fetch(`${BACKEND_URL}/api/platform-credentials${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...options.headers,
+    },
+  });
+
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || `Request failed: ${res.status}`);
+  return body;
+}
+
+function PlatformApiKeySection() {
+  const [credential, setCredential] = useState(null); // Current anthropic credential from DB
   const [loading, setLoading] = useState(true);
-  const [seeding, setSeeding] = useState(false);
-  const [seedResult, setSeedResult] = useState(null);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
 
-  useEffect(() => { loadData(); }, []);
+  // Form
+  const [editing, setEditing] = useState(false);
+  const [formKey, setFormKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  async function loadData() {
+  // Test / delete
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => { loadCredentials(); }, []);
+
+  async function loadCredentials() {
     setLoading(true);
-    const agents = getAllSourceAgents();
-    setSourceAgents(agents);
-
-    const { data, error: fetchErr } = await supabase
-      .from('alf_agent_definitions')
-      .select('*')
-      .order('agent_key');
-
-    if (fetchErr) {
-      setError(fetchErr.message);
-    } else {
-      setDbAgents(data || []);
+    setError(null);
+    try {
+      const data = await platformCredentialFetch('');
+      const anthropic = data.find((c) => c.service_type === 'anthropic');
+      setCredential(anthropic || null);
+    } catch (err) {
+      setError(err.message);
     }
     setLoading(false);
   }
 
-  async function handleSeed() {
-    setSeeding(true);
+  async function handleSave() {
+    if (!formKey.trim()) return;
+    setSaving(true);
     setError(null);
-    setSeedResult(null);
+    setSuccess(null);
 
-    const rows = sourceAgents.map((agent) => ({
-      agent_key: agent.key,
-      name: agent.name || agent.key,
-      department: agent.department || 'general',
-      model: agent.model || 'claude-sonnet-4-5-20250929',
-      system_prompt: agent.systemPrompt || '',
-      status: 'active',
-      actions: agent.actions
-        ? Object.entries(agent.actions).map(([k, v]) => ({
-            key: k,
-            label: v.label || k,
-            description: v.description || '',
-          }))
-        : [],
-    }));
-
-    const { data, error: upsertErr } = await supabase
-      .from('alf_agent_definitions')
-      .upsert(rows, { onConflict: 'agent_key' })
-      .select();
-
-    if (upsertErr) {
-      setError(upsertErr.message);
-    } else {
-      setSeedResult(`Seeded ${data.length} agent(s) to database.`);
-      setDbAgents(data);
+    try {
+      const result = await platformCredentialFetch('', {
+        method: 'POST',
+        body: JSON.stringify({ service_type: 'anthropic', key: formKey, label: 'Platform Anthropic Key' }),
+      });
+      setCredential(result);
+      setSuccess('Platform API key saved');
+      setTimeout(() => setSuccess(null), 3000);
+      setEditing(false);
+      setFormKey('');
+      setShowKey(false);
+    } catch (err) {
+      setError(err.message);
     }
-    setSeeding(false);
+    setSaving(false);
   }
 
-  const dbKeys = new Set(dbAgents.map((a) => a.agent_key));
+  async function handleTest() {
+    if (!credential) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await platformCredentialFetch(`/${credential.id}/test`, { method: 'POST' });
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({ success: false, message: err.message });
+    }
+    setTesting(false);
+  }
 
-  const columns = [
-    {
-      key: 'key', label: 'Agent Key',
-      render: (val) => <span className="font-mono text-xs font-medium text-dark-text">{val}</span>,
-    },
-    {
-      key: 'name', label: 'Name',
-      render: (val) => <span className="text-sm">{val || '\u2014'}</span>,
-    },
-    {
-      key: 'description', label: 'Description',
-      render: (val) => <span className="text-xs text-secondary-text line-clamp-2">{val || '\u2014'}</span>,
-    },
-    {
-      key: 'model', label: 'Model',
-      render: (val) => <span className="text-xs font-mono text-secondary-text">{val || 'default'}</span>,
-    },
-    {
-      key: 'key', label: 'In DB',
-      render: (val) => dbKeys.has(val)
-        ? <CheckCircle size={16} className="text-green-500" />
-        : <span className="text-xs text-secondary-text">\u2014</span>,
-    },
-  ];
-
-  const tableData = sourceAgents.map((a) => ({
-    id: a.key,
-    key: a.key,
-    name: a.name || a.key,
-    description: a.description || '',
-    model: a.model || null,
-  }));
+  async function handleDelete() {
+    if (!credential) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await platformCredentialFetch(`/${credential.id}`, { method: 'DELETE' });
+      setCredential(null);
+      setSuccess('Platform API key removed');
+      setTimeout(() => setSuccess(null), 3000);
+      setConfirmDelete(false);
+    } catch (err) {
+      setError(err.message);
+    }
+    setDeleting(false);
+  }
 
   return (
     <section>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-lg font-semibold text-dark-text">Agent Registry</h2>
-          {!loading && (
-            <p className="text-sm text-secondary-text mt-1">
-              {sourceAgents.length} source-code agents &middot; {dbAgents.length} in database
-            </p>
-          )}
-        </div>
-        <button
-          onClick={handleSeed}
-          disabled={seeding || loading}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
-        >
-          {seeding ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
-          {seeding ? 'Seeding...' : 'Seed to Database'}
-        </button>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-dark-text">Platform API Key</h2>
+        <p className="text-sm text-secondary-text mt-1">
+          Anthropic API key for platform-level agent calls (Ask Alf). Falls back to server environment variable if not set here.
+        </p>
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-3">{error}</div>}
-      {seedResult && <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg mb-3">{seedResult}</div>}
+      {success && <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg mb-3">{success}</div>}
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center py-8">
           <Loader2 size={20} className="text-amber-500 animate-spin" />
         </div>
       ) : (
-        <DataTable columns={columns} data={tableData} />
+        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          {/* Current status */}
+          <div className="flex items-center gap-3">
+            <Key size={18} className={credential ? 'text-green-600' : 'text-gray-400'} />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-dark-text">
+                {credential ? 'Anthropic API Key Configured' : 'No API Key Set'}
+              </div>
+              {credential && (
+                <div className="text-xs text-secondary-text mt-0.5">
+                  Hint: ...{credential.key_hint} &middot; Last updated {new Date(credential.updated_at).toLocaleDateString()}
+                </div>
+              )}
+            </div>
+            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+              credential ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+            }`}>
+              {credential ? 'Active' : 'Not Set'}
+            </span>
+          </div>
+
+          {/* Test result */}
+          {testResult && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+              testResult.success
+                ? 'bg-green-50 text-green-700 border border-green-200'
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
+              {testResult.success ? <CheckCircle size={16} /> : <XCircle size={16} />}
+              {testResult.message}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setEditing(!editing); setTestResult(null); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+            >
+              <Key size={14} />
+              {credential ? 'Update Key' : 'Set Key'}
+            </button>
+            {credential && (
+              <>
+                <button
+                  onClick={handleTest}
+                  disabled={testing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-secondary-text border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {testing ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />}
+                  Test
+                </button>
+                {confirmDelete ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                      {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      Confirm Remove
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-3 py-1.5 text-sm text-secondary-text hover:text-dark-text transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-400 border border-gray-200 rounded-lg hover:text-red-500 hover:border-red-200 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                    Remove
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Edit form */}
+          {editing && (
+            <div className="border-t border-gray-200 pt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-secondary-text mb-1">API Key</label>
+                <div className="relative">
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={formKey}
+                    onChange={(e) => setFormKey(e.target.value)}
+                    className="w-full px-3 py-2 pr-10 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    placeholder="sk-ant-..."
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey(!showKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !formKey.trim()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save Key
+                </button>
+                <button
+                  onClick={() => { setEditing(false); setFormKey(''); setShowKey(false); }}
+                  className="px-3 py-1.5 text-sm text-secondary-text hover:text-dark-text transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </section>
   );

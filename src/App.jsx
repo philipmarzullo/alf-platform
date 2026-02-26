@@ -13,6 +13,8 @@ import {
   PlatformTenantsPage,
   PlatformTenantDetailPage,
   PlatformNewTenantPage,
+  PlatformAgentsPage,
+  PlatformAgentDetailPage,
   PlatformUsagePage,
   PlatformSettingsPage,
 } from './pages/platform';
@@ -23,8 +25,10 @@ function usePageContext() {
   if (pathname === '/') return 'Dashboard — platform overview with tenant and usage summaries';
   if (pathname === '/platform/tenants') return 'Tenants list — managing all tenant organizations';
   if (pathname.startsWith('/platform/tenants/')) return 'Tenant detail — viewing a specific tenant\'s config, users, agents, API keys, and branding';
+  if (pathname === '/platform/agents') return 'Agents — managing global agent definitions, models, and system prompts';
+  if (pathname.startsWith('/platform/agents/')) return 'Agent detail — editing agent config, viewing tenant assignments';
   if (pathname === '/platform/usage') return 'Usage — viewing agent call logs and token consumption';
-  if (pathname === '/platform/settings') return 'Settings — platform config, agent registry, and platform user management';
+  if (pathname === '/platform/settings') return 'Settings — platform config, API keys, and platform user management';
   return 'Alf Platform';
 }
 
@@ -98,11 +102,13 @@ export default function App() {
           <Route path="/platform/tenants" element={<PlatformTenantsPage />} />
           <Route path="/platform/tenants/new" element={<PlatformNewTenantPage />} />
           <Route path="/platform/tenants/:id" element={<PlatformTenantDetailPage />} />
+          <Route path="/platform/agents" element={<PlatformAgentsPage />} />
+          <Route path="/platform/agents/:agentKey" element={<PlatformAgentDetailPage />} />
           <Route path="/platform/usage" element={<PlatformUsagePage />} />
           <Route path="/platform/settings" element={<PlatformSettingsPage />} />
           {/* Redirects from old routes */}
           <Route path="/platform/config" element={<Navigate to="/platform/settings" replace />} />
-          <Route path="/platform/agents" element={<Navigate to="/platform/settings" replace />} />
+          {/* /platform/agents is now a real route, redirect removed */}
           <Route path="/platform/templates" element={<Navigate to="/platform/settings" replace />} />
           <Route path="/platform/brand" element={<Navigate to="/platform/settings" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
