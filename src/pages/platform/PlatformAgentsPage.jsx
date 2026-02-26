@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Database, Bot } from 'lucide-react';
+import { Loader2, Database, Bot, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { getAllSourceAgents } from '../../agents/registry';
-import { DEPT_COLORS, MODEL_OPTIONS } from '../../data/constants';
+import { DEPT_COLORS, STATUS } from '../../data/constants';
 
 const DEPT_LABELS = {
   hr: 'HR', finance: 'Finance', purchasing: 'Purchasing',
@@ -11,19 +11,36 @@ const DEPT_LABELS = {
   platform: 'Platform', tools: 'Tools', general: 'General',
 };
 
-function modelLabel(modelId) {
-  const found = MODEL_OPTIONS.find((m) => m.value === modelId);
-  return found ? found.label : modelId || 'default';
+const AGENT_MODULE_MAP = {
+  hr: 'hr', finance: 'finance', purchasing: 'purchasing',
+  sales: 'sales', ops: 'ops', admin: null, qbu: 'qbu', salesDeck: 'salesDeck',
+};
+
+function getAgentStatus(agentKey, tenantModules, overrides) {
+  const requiredModule = AGENT_MODULE_MAP[agentKey];
+  const moduleEnabled = requiredModule === null || (tenantModules || []).includes(requiredModule);
+  if (!moduleEnabled) return 'module_off';
+  const override = overrides.find((o) => o.agent_key === agentKey);
+  if (override && !override.is_enabled) return 'disabled';
+  return 'active';
 }
+
+const AGENT_STATUS_STYLES = {
+  active: { label: 'Active', className: 'bg-green-50 text-green-700' },
+  disabled: { label: 'Disabled', className: 'bg-red-50 text-red-700' },
+  module_off: { label: 'Module Off', className: 'bg-gray-100 text-gray-500' },
+};
 
 export default function PlatformAgentsPage() {
   const navigate = useNavigate();
   const [agents, setAgents] = useState([]);
+  const [tenants, setTenants] = useState([]);
+  const [overrides, setOverrides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState(null);
-  const [tenantCounts, setTenantCounts] = useState({});
+  const [expandedTenant, setExpandedTenant] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -34,25 +51,17 @@ export default function PlatformAgentsPage() {
     try {
       const sourceAgents = getAllSourceAgents();
 
-      // Fetch DB agents and tenant overrides in parallel
-      const [dbRes, overridesRes] = await Promise.all([
+      const [dbRes, tenantsRes, overridesRes] = await Promise.all([
         supabase.from('alf_agent_definitions').select('*').order('agent_key'),
-        supabase.from('tenant_agent_overrides').select('agent_key, is_enabled'),
+        supabase.from('alf_tenants').select('id, company_name, slug, status, modules').order('company_name'),
+        supabase.from('tenant_agent_overrides').select('tenant_id, agent_key, is_enabled, custom_prompt_additions'),
       ]);
 
       if (dbRes.error) throw dbRes.error;
+      if (tenantsRes.error) throw tenantsRes.error;
 
       const dbAgents = dbRes.data || [];
       const dbMap = new Map(dbAgents.map((a) => [a.agent_key, a]));
-
-      // Count enabled tenants per agent
-      const counts = {};
-      (overridesRes.data || []).forEach((o) => {
-        if (o.is_enabled !== false) {
-          counts[o.agent_key] = (counts[o.agent_key] || 0) + 1;
-        }
-      });
-      setTenantCounts(counts);
 
       // Merge: DB preferred, source-code fallback
       const merged = sourceAgents.map((src) => {
@@ -88,6 +97,14 @@ export default function PlatformAgentsPage() {
       }
 
       setAgents(merged);
+      setTenants(tenantsRes.data || []);
+      setOverrides(overridesRes.data || []);
+
+      // Auto-expand if only one tenant
+      const tenantList = tenantsRes.data || [];
+      if (tenantList.length === 1) {
+        setExpandedTenant(tenantList[0].id);
+      }
     } catch (err) {
       setError(err.message);
     }
@@ -132,6 +149,20 @@ export default function PlatformAgentsPage() {
     setSeeding(false);
   }
 
+  const tenantAgents = agents.filter((a) => a.department !== 'platform');
+  const platformAgents = agents.filter((a) => a.department === 'platform');
+
+  function getTenantAgentSummary(tenant) {
+    const tenantOverrides = overrides.filter((o) => o.tenant_id === tenant.id);
+    let activeCount = 0;
+    for (const agent of tenantAgents) {
+      if (getAgentStatus(agent.key, tenant.modules, tenantOverrides) === 'active') {
+        activeCount++;
+      }
+    }
+    return { activeCount, total: tenantAgents.length };
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -139,7 +170,7 @@ export default function PlatformAgentsPage() {
         <div>
           <h1 className="text-xl font-semibold text-dark-text">Agents</h1>
           <p className="text-sm text-secondary-text mt-1">
-            Manage global agent definitions — models, system prompts, and status
+            Manage agent definitions and tenant assignments
           </p>
         </div>
         <button
@@ -152,7 +183,7 @@ export default function PlatformAgentsPage() {
         </button>
       </div>
 
-      {/* Seed warning */}
+      {/* Alerts */}
       {seedResult && (
         <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">
           {seedResult}
@@ -175,70 +206,162 @@ export default function PlatformAgentsPage() {
           <p className="text-sm text-secondary-text">No agents found. Click "Seed All to Database" to populate from source.</p>
         </div>
       ) : (
-        /* Agent Cards Grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {agents.map((agent) => {
-            const deptColor = DEPT_COLORS[agent.department] || '#6B7280';
-            const isActive = agent.status === 'active';
-            const actionCount = Array.isArray(agent.actions) ? agent.actions.length : 0;
-            const enabledCount = tenantCounts[agent.key] || 0;
+        <div className="space-y-3">
+          {/* Tenant accordion sections */}
+          {tenants.map((tenant) => {
+            const isExpanded = expandedTenant === tenant.id;
+            const { activeCount, total } = getTenantAgentSummary(tenant);
+            const tenantOverrides = overrides.filter((o) => o.tenant_id === tenant.id);
+            const statusMeta = STATUS[tenant.status] || STATUS.setup;
 
             return (
-              <button
-                key={agent.key}
-                onClick={() => navigate(`/platform/agents/${agent.key}`)}
-                className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left hover:shadow-md hover:border-gray-300 transition-all group"
-                style={{ borderLeftColor: deptColor, borderLeftWidth: '3px' }}
-              >
-                <div className="p-4 space-y-3">
-                  {/* Top row: name + badges */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-dark-text truncate group-hover:text-amber-700 transition-colors">
-                        {agent.name}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span
-                          className="px-1.5 py-0.5 text-[10px] font-medium rounded"
-                          style={{ backgroundColor: deptColor + '18', color: deptColor }}
-                        >
-                          {DEPT_LABELS[agent.department] || agent.department}
-                        </span>
-                        <span className="text-[10px] font-mono text-secondary-text">
-                          {modelLabel(agent.model)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
-                        isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {isActive ? 'Active' : 'Inactive'}
-                      </span>
-                      <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
-                        agent.inDb ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {agent.inDb ? 'In DB' : 'Source Only'}
-                      </span>
-                    </div>
-                  </div>
+              <div key={tenant.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                {/* Tenant header row */}
+                <button
+                  onClick={() => setExpandedTenant(isExpanded ? null : tenant.id)}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                >
+                  {isExpanded
+                    ? <ChevronDown size={16} className="text-gray-400 shrink-0" />
+                    : <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  }
+                  <span className="text-sm font-semibold text-dark-text truncate">
+                    {tenant.company_name}
+                  </span>
+                  <span className="text-xs text-secondary-text whitespace-nowrap">
+                    {activeCount} of {total} active
+                  </span>
+                  <span
+                    className="ml-auto px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap shrink-0"
+                    style={{ backgroundColor: statusMeta.bg, color: statusMeta.text }}
+                  >
+                    {statusMeta.label}
+                  </span>
+                </button>
 
-                  {/* System prompt preview */}
-                  <p className="text-xs text-secondary-text line-clamp-2 leading-relaxed">
-                    {agent.systemPrompt
-                      ? agent.systemPrompt.slice(0, 120) + (agent.systemPrompt.length > 120 ? '...' : '')
-                      : '— No system prompt —'}
-                  </p>
+                {/* Expanded agent table */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-secondary-text">
+                          <th className="text-left font-medium px-4 py-2">Agent</th>
+                          <th className="text-left font-medium px-4 py-2">Department</th>
+                          <th className="text-left font-medium px-4 py-2">Status</th>
+                          <th className="text-right font-medium px-4 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tenantAgents.map((agent) => {
+                          const deptColor = DEPT_COLORS[agent.department] || '#6B7280';
+                          const status = getAgentStatus(agent.key, tenant.modules, tenantOverrides);
+                          const statusStyle = AGENT_STATUS_STYLES[status];
 
-                  {/* Footer stats */}
-                  <div className="flex items-center gap-4 pt-1 border-t border-gray-100 text-[11px] text-secondary-text">
-                    <span>{actionCount} action{actionCount !== 1 ? 's' : ''}</span>
-                    <span>Enabled for {enabledCount} tenant{enabledCount !== 1 ? 's' : ''}</span>
+                          return (
+                            <tr key={agent.key} className="border-t border-gray-50 hover:bg-gray-50/50">
+                              <td className="px-4 py-2.5">
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className="w-1 h-5 rounded-full shrink-0"
+                                    style={{ backgroundColor: deptColor }}
+                                  />
+                                  <span className="text-sm font-medium text-dark-text">
+                                    {agent.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span
+                                  className="px-1.5 py-0.5 text-[10px] font-medium rounded"
+                                  style={{ backgroundColor: deptColor + '18', color: deptColor }}
+                                >
+                                  {DEPT_LABELS[agent.department] || agent.department}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${statusStyle.className}`}>
+                                  {statusStyle.label}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                <button
+                                  onClick={() => navigate(`/platform/agents/${agent.key}`)}
+                                  className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                                >
+                                  Edit Agent →
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-              </button>
+                )}
+              </div>
             );
           })}
+
+          {/* Platform section */}
+          {platformAgents.length > 0 && (
+            <>
+              <div className="flex items-center gap-3 pt-2">
+                <div className="h-px flex-1 bg-gray-200" />
+                <span className="text-xs font-medium text-secondary-text uppercase tracking-wider">Platform</span>
+                <div className="h-px flex-1 bg-gray-200" />
+              </div>
+
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {platformAgents.map((agent) => {
+                      const deptColor = DEPT_COLORS[agent.department] || '#6B7280';
+                      const isActive = agent.status === 'active';
+
+                      return (
+                        <tr key={agent.key} className="hover:bg-gray-50/50">
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-1 h-5 rounded-full shrink-0"
+                                style={{ backgroundColor: deptColor }}
+                              />
+                              <span className="text-sm font-medium text-dark-text">
+                                {agent.name}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span
+                              className="px-1.5 py-0.5 text-[10px] font-medium rounded"
+                              style={{ backgroundColor: deptColor + '18', color: deptColor }}
+                            >
+                              {DEPT_LABELS[agent.department] || agent.department}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                              isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              onClick={() => navigate(`/platform/agents/${agent.key}`)}
+                              className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                            >
+                              Edit Agent →
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
 
