@@ -64,8 +64,13 @@ export async function callAgent(agentKey, actionKey, data) {
 
 /**
  * Chat with an agent (multi-turn) through the backend proxy.
+ *
+ * @param {string} agentKey - Key from the registry (e.g., 'hr', 'alfPlatform')
+ * @param {Array} messages - Conversation messages [{role, content}]
+ * @param {object} [options] - Optional settings
+ * @param {string} [options.pageContext] - Current page context to append to system prompt
  */
-export async function chatWithAgent(agentKey, messages) {
+export async function chatWithAgent(agentKey, messages, options = {}) {
   const agent = getAgent(agentKey);
   if (!agent) throw new Error(`Agent not found: ${agentKey}`);
 
@@ -77,6 +82,11 @@ export async function chatWithAgent(agentKey, messages) {
 
   const tenantId = getTenantId();
 
+  let systemPrompt = agent.systemPrompt;
+  if (options.pageContext) {
+    systemPrompt += `\n\nCurrent page context: The user is currently viewing: ${options.pageContext}. Use this context to give relevant, specific answers.`;
+  }
+
   const response = await fetch(`${BACKEND_URL}/api/claude`, {
     method: 'POST',
     headers: {
@@ -86,7 +96,7 @@ export async function chatWithAgent(agentKey, messages) {
     body: JSON.stringify({
       model: agent.model,
       max_tokens: 1024,
-      system: agent.systemPrompt,
+      system: systemPrompt,
       messages,
       agent_key: agentKey,
       tenant_id: tenantId,

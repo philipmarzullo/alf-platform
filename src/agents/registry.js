@@ -6,6 +6,7 @@ import { salesDeckAgent } from './configs/salesDeck';
 import { salesAgent } from './configs/sales';
 import { opsAgent } from './configs/ops';
 import { adminAgent } from './configs/admin';
+import { alfPlatformAgent } from './configs/alfPlatform';
 import { mergeOverride } from './overrides';
 
 const agents = {
@@ -17,6 +18,7 @@ const agents = {
   admin: adminAgent,
   qbu: qbuAgent,
   salesDeck: salesDeckAgent,
+  alfPlatform: alfPlatformAgent,
 };
 
 /** Returns the agent config with any localStorage overrides merged in. */

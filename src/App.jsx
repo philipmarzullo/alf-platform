@@ -1,9 +1,10 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { useUser } from './contexts/UserContext';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import PageWrapper from './components/layout/PageWrapper';
+import AskAlfButton from './components/shared/AskAlfButton';
 import LoginPage from './pages/auth/LoginPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
@@ -17,7 +18,19 @@ import {
 } from './pages/platform';
 import { Loader2 } from 'lucide-react';
 
+function usePageContext() {
+  const { pathname } = useLocation();
+  if (pathname === '/') return 'Dashboard — platform overview with tenant and usage summaries';
+  if (pathname === '/platform/tenants') return 'Tenants list — managing all tenant organizations';
+  if (pathname.startsWith('/platform/tenants/')) return 'Tenant detail — viewing a specific tenant\'s config, users, agents, API keys, and branding';
+  if (pathname === '/platform/usage') return 'Usage — viewing agent call logs and token consumption';
+  if (pathname === '/platform/settings') return 'Settings — platform config, agent registry, and platform user management';
+  return 'Alf Platform';
+}
+
 function PlatformLayout({ children }) {
+  const pageContext = usePageContext();
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
@@ -25,6 +38,7 @@ function PlatformLayout({ children }) {
         <TopBar />
         <PageWrapper>{children}</PageWrapper>
       </div>
+      <AskAlfButton pageContext={pageContext} />
     </div>
   );
 }
