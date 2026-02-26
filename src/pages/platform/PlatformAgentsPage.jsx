@@ -53,7 +53,7 @@ export default function PlatformAgentsPage() {
 
       const [dbRes, tenantsRes, overridesRes] = await Promise.all([
         supabase.from('alf_agent_definitions').select('*').order('agent_key'),
-        supabase.from('alf_tenants').select('id, company_name, slug, status, modules').order('company_name'),
+        supabase.from('alf_tenants').select('*').order('company_name'),
         supabase.from('tenant_agent_overrides').select('tenant_id, agent_key, is_enabled, custom_prompt_additions'),
       ]);
 
