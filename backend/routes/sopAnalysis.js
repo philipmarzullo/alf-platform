@@ -112,6 +112,60 @@ Return JSON matching this exact schema:
   "recommended_first_action": "string — start with..."
 }`;
 
+// ─── Action Conversion Prompts ──────────────────────────────────────────────
+
+const CLASSIFICATION_SYSTEM_PROMPT = `You are an automation action classifier for facility services companies. You classify roadmap items into categories based on whether an AI agent can handle them.
+
+RULES:
+- "agent": AI agent can fully produce the deliverable (emails, checklists, instructions, templates, WinTeam steps)
+- "hybrid": Agent can draft/assist but a human must review, approve, or deploy (workflow configs, integration specs, template packages, policy changes)
+- "manual": Requires human judgment, compliance authority, vendor coordination, system access agents don't have (VP approvals, union negotiations, safety sign-offs)
+- Be conservative — when in doubt, classify as hybrid rather than agent
+- agent_key must match one of the available agents for the department
+
+Return ONLY valid JSON. No markdown, no explanation.`;
+
+const CLASSIFICATION_USER_PROMPT = (item, department, sopAnalysis, agentKeys) => `Classify this automation roadmap item.
+
+ROADMAP ITEM: ${JSON.stringify(item)}
+DEPARTMENT: ${department}
+SOURCE SOP ANALYSIS: ${JSON.stringify(sopAnalysis)}
+AVAILABLE AGENT KEYS FOR THIS DEPARTMENT: ${JSON.stringify(agentKeys)}
+
+Return JSON:
+{
+  "assignee_type": "agent|hybrid|manual",
+  "agent_key": "hr|finance|ops|sales|purchasing|admin|null",
+  "title": "string — concise action title",
+  "skill_summary": "string — what the agent would do",
+  "agent_skill_context": "string — relevant SOP excerpt for the agent"
+}`;
+
+const SKILL_GENERATION_SYSTEM_PROMPT = `You are creating a new skill for an AI agent at a facility services company. The agent already has access to the full SOP document. This skill teaches the agent to handle a specific automation task.
+
+RULES:
+- Be specific and actionable — the agent will use this prompt verbatim
+- Reference SOP steps by number where possible
+- Specify the expected output format clearly
+- Include quality criteria so the agent knows what "good" looks like
+- Note any human handoff points
+
+Return ONLY valid JSON. No markdown, no explanation.`;
+
+const SKILL_GENERATION_USER_PROMPT = (action, sopContext) => `Generate a skill prompt for an AI agent.
+
+TASK: ${action.title} — ${action.description}
+RELEVANT SOP CONTEXT: ${action.agent_skill_context || sopContext || 'No specific SOP context available'}
+DEPARTMENT: ${action.department}
+
+Return JSON:
+{
+  "skill_prompt": "string — 200-400 word prompt that teaches the agent this skill",
+  "suggested_action_label": "string — short label for this skill (e.g. 'Draft Benefits Reminder')",
+  "suggested_action_description": "string — one-line description",
+  "output_format": "email|checklist|instructions|template|report|other"
+}`;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function callClaude(apiKey, systemPrompt, userPrompt, maxTokens) {
@@ -386,6 +440,391 @@ router.post('/roadmap', rateLimit, async (req, res) => {
       .eq('id', row.id);
 
     res.status(502).json({ error: 'Roadmap generation failed: ' + err.message });
+  }
+});
+
+// ─── Phase 2: Action Conversion & Skill Generation ─────────────────────────
+
+// Maps departments to their primary agent keys
+const DEPT_AGENT_MAP = {
+  hr: ['hr'],
+  finance: ['finance'],
+  purchasing: ['purchasing'],
+  sales: ['sales'],
+  ops: ['ops'],
+  admin: ['admin'],
+  general: ['admin'],
+};
+
+/**
+ * POST /api/sop-analysis/convert-to-actions
+ *
+ * Convert a department roadmap into trackable automation actions.
+ * Body: { tenant_id, roadmap_id }
+ */
+router.post('/convert-to-actions', rateLimit, async (req, res) => {
+  if (!requirePlatformAdmin(req, res)) return;
+
+  const { tenant_id, roadmap_id } = req.body;
+
+  if (!tenant_id || !roadmap_id) {
+    return res.status(400).json({ error: 'Required: tenant_id, roadmap_id' });
+  }
+
+  // Resolve API key
+  let apiKey, keySource;
+  try {
+    ({ apiKey, keySource } = await resolveApiKey(req, { tenantIdOverride: tenant_id }));
+  } catch (err) {
+    return res.status(err.status || 403).json({ error: err.message });
+  }
+
+  // Fetch roadmap
+  const { data: roadmap, error: rmErr } = await req.supabase
+    .from('dept_automation_roadmaps')
+    .select('*')
+    .eq('id', roadmap_id)
+    .eq('tenant_id', tenant_id)
+    .eq('status', 'completed')
+    .single();
+
+  if (rmErr || !roadmap) {
+    return res.status(404).json({ error: 'Completed roadmap not found' });
+  }
+
+  // Fetch related SOP analyses for context
+  const { data: sopAnalyses } = await req.supabase
+    .from('sop_analyses')
+    .select('id, document_id, analysis')
+    .eq('tenant_id', tenant_id)
+    .eq('department', roadmap.department)
+    .eq('status', 'completed');
+
+  const sopContext = sopAnalyses?.map(a => a.analysis) || [];
+  const agentKeys = DEPT_AGENT_MAP[roadmap.department] || ['admin'];
+  const actions = [];
+
+  // Process each phase's items
+  for (const phase of (roadmap.roadmap?.phases || [])) {
+    const phaseKey = phase.phase === 'quick-wins' ? 'quick-win' : phase.phase;
+
+    for (const item of (phase.items || [])) {
+      try {
+        const userPrompt = CLASSIFICATION_USER_PROMPT(item, roadmap.department, sopContext, agentKeys);
+        const data = await callClaude(apiKey, CLASSIFICATION_SYSTEM_PROMPT, userPrompt, 1024);
+        const classification = parseJsonResponse(data);
+
+        const inputTokens = data.usage?.input_tokens || 0;
+        const outputTokens = data.usage?.output_tokens || 0;
+
+        console.log(`[sop-analysis] Classified: "${classification.title}" → ${classification.assignee_type} | tokens: ${inputTokens}+${outputTokens}`);
+
+        // Insert action row
+        const { data: actionRow, error: insertErr } = await req.supabase
+          .from('automation_actions')
+          .insert({
+            tenant_id,
+            department: roadmap.department,
+            roadmap_id: roadmap.id,
+            phase: phaseKey,
+            title: classification.title || item.description?.slice(0, 100) || 'Untitled action',
+            description: item.description || classification.skill_summary || '',
+            source_sop: item.source_sop || null,
+            assignee_type: classification.assignee_type || 'manual',
+            status: classification.assignee_type === 'manual' ? 'manual' : 'planned',
+            agent_key: classification.agent_key || null,
+            agent_skill_context: classification.agent_skill_context || null,
+            effort: item.effort || null,
+            impact: item.impact || null,
+            estimated_time_saved: item.estimated_time_saved || null,
+          })
+          .select()
+          .single();
+
+        if (insertErr) {
+          console.error('[sop-analysis] Action insert error:', insertErr.message);
+          continue;
+        }
+
+        // Log usage
+        req.supabase
+          .from('alf_usage_logs')
+          .insert({
+            tenant_id,
+            user_id: req.user.id,
+            action: 'action_classification',
+            agent_key: 'automation',
+            tokens_input: inputTokens,
+            tokens_output: outputTokens,
+            model: ANALYSIS_MODEL,
+          })
+          .then(({ error }) => {
+            if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
+          });
+
+        actions.push(actionRow);
+      } catch (err) {
+        console.error(`[sop-analysis] Classification failed for item:`, err.message);
+        // Insert as manual fallback
+        const { data: fallbackRow } = await req.supabase
+          .from('automation_actions')
+          .insert({
+            tenant_id,
+            department: roadmap.department,
+            roadmap_id: roadmap.id,
+            phase: phaseKey,
+            title: item.description?.slice(0, 100) || 'Untitled action',
+            description: item.description || '',
+            source_sop: item.source_sop || null,
+            assignee_type: 'manual',
+            status: 'manual',
+            effort: item.effort || null,
+            impact: item.impact || null,
+            estimated_time_saved: item.estimated_time_saved || null,
+          })
+          .select()
+          .single();
+
+        if (fallbackRow) actions.push(fallbackRow);
+      }
+    }
+  }
+
+  res.json({ actions, count: actions.length });
+});
+
+/**
+ * POST /api/sop-analysis/generate-skill
+ *
+ * Generate an agent skill prompt for an automation action.
+ * Body: { tenant_id, action_id }
+ */
+router.post('/generate-skill', rateLimit, async (req, res) => {
+  if (!requirePlatformAdmin(req, res)) return;
+
+  const { tenant_id, action_id } = req.body;
+
+  if (!tenant_id || !action_id) {
+    return res.status(400).json({ error: 'Required: tenant_id, action_id' });
+  }
+
+  // Resolve API key
+  let apiKey, keySource;
+  try {
+    ({ apiKey, keySource } = await resolveApiKey(req, { tenantIdOverride: tenant_id }));
+  } catch (err) {
+    return res.status(err.status || 403).json({ error: err.message });
+  }
+
+  // Fetch the action
+  const { data: action, error: actErr } = await req.supabase
+    .from('automation_actions')
+    .select('*')
+    .eq('id', action_id)
+    .eq('tenant_id', tenant_id)
+    .single();
+
+  if (actErr || !action) {
+    return res.status(404).json({ error: 'Action not found' });
+  }
+
+  if (!['planned', 'ready_for_review'].includes(action.status)) {
+    return res.status(400).json({ error: `Cannot generate skill for action with status: ${action.status}` });
+  }
+
+  // Update status to generating
+  await req.supabase
+    .from('automation_actions')
+    .update({ status: 'skill_generating' })
+    .eq('id', action_id);
+
+  try {
+    // Fetch source SOP context if available
+    let sopContext = action.agent_skill_context || '';
+    if (!sopContext && action.source_sop) {
+      const { data: docs } = await req.supabase
+        .from('tenant_documents')
+        .select('extracted_text')
+        .eq('tenant_id', tenant_id)
+        .ilike('file_name', `%${action.source_sop}%`)
+        .limit(1);
+
+      if (docs?.[0]?.extracted_text) {
+        sopContext = docs[0].extracted_text.slice(0, 3000);
+      }
+    }
+
+    const userPrompt = SKILL_GENERATION_USER_PROMPT(action, sopContext);
+    const data = await callClaude(apiKey, SKILL_GENERATION_SYSTEM_PROMPT, userPrompt, 2048);
+    const skill = parseJsonResponse(data);
+    const inputTokens = data.usage?.input_tokens || 0;
+    const outputTokens = data.usage?.output_tokens || 0;
+
+    console.log(`[sop-analysis] Skill generated: "${action.title}" | key: ${keySource} | tokens: ${inputTokens}+${outputTokens}`);
+
+    // Update action with generated skill
+    const { data: updated, error: updateErr } = await req.supabase
+      .from('automation_actions')
+      .update({
+        agent_skill_prompt: skill.skill_prompt,
+        status: 'ready_for_review',
+      })
+      .eq('id', action_id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    // Log usage
+    req.supabase
+      .from('alf_usage_logs')
+      .insert({
+        tenant_id,
+        user_id: req.user.id,
+        action: 'skill_generation',
+        agent_key: 'automation',
+        tokens_input: inputTokens,
+        tokens_output: outputTokens,
+        model: ANALYSIS_MODEL,
+      })
+      .then(({ error }) => {
+        if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
+      });
+
+    res.json({ action: updated, skill });
+  } catch (err) {
+    console.error('[sop-analysis] Skill generation failed:', err.message);
+
+    await req.supabase
+      .from('automation_actions')
+      .update({ status: 'planned' })
+      .eq('id', action_id);
+
+    res.status(502).json({ error: 'Skill generation failed: ' + err.message });
+  }
+});
+
+/**
+ * POST /api/sop-analysis/activate-skill
+ *
+ * Activate an agent skill — push it into tenant_agent_overrides.
+ * Body: { tenant_id, action_id }
+ */
+router.post('/activate-skill', rateLimit, async (req, res) => {
+  if (!requirePlatformAdmin(req, res)) return;
+
+  const { tenant_id, action_id } = req.body;
+
+  if (!tenant_id || !action_id) {
+    return res.status(400).json({ error: 'Required: tenant_id, action_id' });
+  }
+
+  // Fetch the action
+  const { data: action, error: actErr } = await req.supabase
+    .from('automation_actions')
+    .select('*')
+    .eq('id', action_id)
+    .eq('tenant_id', tenant_id)
+    .single();
+
+  if (actErr || !action) {
+    return res.status(404).json({ error: 'Action not found' });
+  }
+
+  if (action.status !== 'ready_for_review') {
+    return res.status(400).json({ error: `Cannot activate action with status: ${action.status}` });
+  }
+
+  if (!action.agent_skill_prompt || !action.agent_key) {
+    return res.status(400).json({ error: 'Action must have agent_skill_prompt and agent_key to activate' });
+  }
+
+  try {
+    // Fetch or create tenant_agent_overrides row
+    const { data: existing } = await req.supabase
+      .from('tenant_agent_overrides')
+      .select('*')
+      .eq('tenant_id', tenant_id)
+      .eq('agent_key', action.agent_key)
+      .single();
+
+    const skillBlock = `\n\n<!-- SKILL:${action.id} -->\n### ${action.title}\n${action.agent_skill_prompt}\n<!-- /SKILL:${action.id} -->`;
+
+    if (existing) {
+      // Append skill to existing prompt additions
+      const currentAdditions = existing.custom_prompt_additions || '';
+      await req.supabase
+        .from('tenant_agent_overrides')
+        .update({
+          custom_prompt_additions: currentAdditions + skillBlock,
+        })
+        .eq('id', existing.id);
+    } else {
+      // Create new override row
+      await req.supabase
+        .from('tenant_agent_overrides')
+        .insert({
+          tenant_id,
+          agent_key: action.agent_key,
+          custom_prompt_additions: skillBlock,
+          is_enabled: true,
+        });
+    }
+
+    // Update action status
+    const { data: updated, error: updateErr } = await req.supabase
+      .from('automation_actions')
+      .update({ status: 'active' })
+      .eq('id', action_id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    console.log(`[sop-analysis] Skill activated: "${action.title}" → ${action.agent_key} agent`);
+
+    res.json({ action: updated });
+  } catch (err) {
+    console.error('[sop-analysis] Skill activation failed:', err.message);
+    res.status(500).json({ error: 'Skill activation failed: ' + err.message });
+  }
+});
+
+/**
+ * GET /api/sop-analysis/actions
+ *
+ * Fetch automation actions for a tenant.
+ * Query: ?tenant_id=...&department=...&status=...
+ */
+router.get('/actions', async (req, res) => {
+  const { tenant_id, department, status } = req.query;
+
+  let effectiveTenantId = req.tenantId;
+  if (tenant_id && PLATFORM_ROLES.includes(req.user?.role)) {
+    effectiveTenantId = tenant_id;
+  }
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  try {
+    let query = req.supabase
+      .from('automation_actions')
+      .select('*')
+      .eq('tenant_id', effectiveTenantId)
+      .order('created_at', { ascending: true });
+
+    if (department) query = query.eq('department', department);
+    if (status) query = query.eq('status', status);
+
+    const { data: actions, error: err } = await query;
+    if (err) throw err;
+
+    res.json({ actions: actions || [] });
+  } catch (err) {
+    console.error('[sop-analysis] Actions fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch actions' });
   }
 });
 

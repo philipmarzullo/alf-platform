@@ -41,7 +41,25 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     `--- ${d.doc_type.toUpperCase()}: ${d.file_name} (${d.department}) ---\n${d.extracted_text}`
   );
 
-  return `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+  let context = `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+
+  // Inject active automation skills for this agent
+  const { data: skills } = await supabase
+    .from('automation_actions')
+    .select('title, agent_skill_prompt')
+    .eq('tenant_id', tenantId)
+    .eq('agent_key', agentKey)
+    .eq('status', 'active')
+    .not('agent_skill_prompt', 'is', null);
+
+  if (skills?.length) {
+    context += '\n\n=== AUTOMATION SKILLS ===\n';
+    context += 'You have the following enhanced capabilities based on SOP analysis:\n\n';
+    context += skills.map(s => `### ${s.title}\n${s.agent_skill_prompt}`).join('\n\n');
+    console.log(`[claude] Injected ${skills.length} automation skill(s) for ${agentKey}`);
+  }
+
+  return context;
 }
 
 /**

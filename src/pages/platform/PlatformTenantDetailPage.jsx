@@ -2106,6 +2106,7 @@ function AutomationTab({ tenantId }) {
   const [documents, setDocuments] = useState([]);
   const [analyses, setAnalyses] = useState([]);
   const [roadmaps, setRoadmaps] = useState([]);
+  const [actions, setActions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -2114,6 +2115,10 @@ function AutomationTab({ tenantId }) {
   const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
   const [expandedAnalysis, setExpandedAnalysis] = useState(null);
   const [expandedRoadmap, setExpandedRoadmap] = useState(null);
+  const [convertingActions, setConvertingActions] = useState(false);
+  const [generatingSkillId, setGeneratingSkillId] = useState(null);
+  const [activatingSkillId, setActivatingSkillId] = useState(null);
+  const [generatingAllSkills, setGeneratingAllSkills] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -2135,10 +2140,14 @@ function AutomationTab({ tenantId }) {
 
       setDocuments(docs || []);
 
-      // Fetch existing analyses and roadmaps
-      const results = await sopAnalysisFetch(`/results?tenant_id=${tenantId}`);
+      // Fetch existing analyses, roadmaps, and actions
+      const [results, actionsResult] = await Promise.all([
+        sopAnalysisFetch(`/results?tenant_id=${tenantId}`),
+        sopAnalysisFetch(`/actions?tenant_id=${tenantId}`),
+      ]);
       setAnalyses(results.analyses || []);
       setRoadmaps(results.roadmaps || []);
+      setActions(actionsResult.actions || []);
     } catch (err) {
       setError(err.message);
     }
@@ -2185,6 +2194,114 @@ function AutomationTab({ tenantId }) {
       setError(err.message);
     }
     setGeneratingRoadmap(false);
+  }
+
+  async function handleConvertToActions(roadmapId) {
+    setError(null);
+    setSuccess(null);
+    setConvertingActions(true);
+
+    try {
+      const result = await sopAnalysisFetch('/convert-to-actions', {
+        method: 'POST',
+        body: JSON.stringify({ tenant_id: tenantId, roadmap_id: roadmapId }),
+      });
+      setSuccess(`Created ${result.count} automation action${result.count !== 1 ? 's' : ''}.`);
+      setTimeout(() => setSuccess(null), 4000);
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+    setConvertingActions(false);
+  }
+
+  async function handleGenerateSkill(actionId) {
+    setError(null);
+    setGeneratingSkillId(actionId);
+
+    try {
+      await sopAnalysisFetch('/generate-skill', {
+        method: 'POST',
+        body: JSON.stringify({ tenant_id: tenantId, action_id: actionId }),
+      });
+      setSuccess('Skill prompt generated.');
+      setTimeout(() => setSuccess(null), 3000);
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+    setGeneratingSkillId(null);
+  }
+
+  async function handleGenerateAllSkills() {
+    setError(null);
+    setGeneratingAllSkills(true);
+
+    const planned = actions.filter(
+      a => a.status === 'planned' && (a.assignee_type === 'agent' || a.assignee_type === 'hybrid')
+    );
+
+    for (const action of planned) {
+      try {
+        await sopAnalysisFetch('/generate-skill', {
+          method: 'POST',
+          body: JSON.stringify({ tenant_id: tenantId, action_id: action.id }),
+        });
+      } catch (err) {
+        console.error(`Skill generation failed for ${action.id}:`, err.message);
+      }
+    }
+
+    setSuccess(`Generated skills for ${planned.length} action(s).`);
+    setTimeout(() => setSuccess(null), 4000);
+    await loadData();
+    setGeneratingAllSkills(false);
+  }
+
+  async function handleActivateSkill(actionId) {
+    setError(null);
+    setActivatingSkillId(actionId);
+
+    try {
+      await sopAnalysisFetch('/activate-skill', {
+        method: 'POST',
+        body: JSON.stringify({ tenant_id: tenantId, action_id: actionId }),
+      });
+      setSuccess('Skill activated and pushed to tenant agent.');
+      setTimeout(() => setSuccess(null), 3000);
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+    setActivatingSkillId(null);
+  }
+
+  async function handleActivateAll() {
+    setError(null);
+    const ready = actions.filter(a => a.status === 'ready_for_review');
+
+    for (const action of ready) {
+      try {
+        await sopAnalysisFetch('/activate-skill', {
+          method: 'POST',
+          body: JSON.stringify({ tenant_id: tenantId, action_id: action.id }),
+        });
+      } catch (err) {
+        console.error(`Activation failed for ${action.id}:`, err.message);
+      }
+    }
+
+    setSuccess(`Activated ${ready.length} skill(s).`);
+    setTimeout(() => setSuccess(null), 4000);
+    await loadData();
+  }
+
+  async function handleDismissAction(actionId) {
+    await supabase
+      .from('automation_actions')
+      .update({ status: 'dismissed' })
+      .eq('id', actionId);
+    await loadData();
   }
 
   // Build lookup: document_id → analysis
@@ -2395,10 +2512,209 @@ function AutomationTab({ tenantId }) {
               Click "Generate Roadmap" to create a phased automation plan for this department.
             </div>
           ) : (
-            <RoadmapDetail roadmap={activeRoadmap.roadmap} />
+            <>
+              <RoadmapDetail roadmap={activeRoadmap.roadmap} />
+              <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-3">
+                <button
+                  onClick={() => handleConvertToActions(activeRoadmap.id)}
+                  disabled={convertingActions}
+                  className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {convertingActions ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                  Convert to Actions
+                </button>
+                <span className="text-xs text-secondary-text">
+                  Classifies each roadmap item as agent-executable, hybrid, or manual
+                </span>
+              </div>
+            </>
           )}
         </div>
       )}
+
+      {/* Automation Actions Section */}
+      {actions.length > 0 && (
+        <ActionsSection
+          actions={filterDept === 'all' ? actions : actions.filter(a => a.department === filterDept)}
+          generatingSkillId={generatingSkillId}
+          activatingSkillId={activatingSkillId}
+          generatingAllSkills={generatingAllSkills}
+          onGenerateSkill={handleGenerateSkill}
+          onActivateSkill={handleActivateSkill}
+          onDismiss={handleDismissAction}
+          onGenerateAllSkills={handleGenerateAllSkills}
+          onActivateAll={handleActivateAll}
+        />
+      )}
+    </div>
+  );
+}
+
+const ASSIGNEE_BADGE = {
+  agent: 'bg-green-50 text-green-700 border-green-200',
+  hybrid: 'bg-blue-50 text-blue-700 border-blue-200',
+  human: 'bg-gray-100 text-gray-600 border-gray-200',
+  manual: 'bg-gray-100 text-gray-600 border-gray-200',
+};
+
+const STATUS_BADGE = {
+  planned: 'bg-gray-100 text-gray-600',
+  skill_generating: 'bg-amber-50 text-amber-700',
+  ready_for_review: 'bg-blue-50 text-blue-700',
+  active: 'bg-green-50 text-green-700',
+  manual: 'bg-gray-100 text-gray-600',
+  dismissed: 'bg-red-50 text-red-400',
+};
+
+const STATUS_ORDER = ['planned', 'skill_generating', 'ready_for_review', 'active', 'manual', 'dismissed'];
+
+function ActionsSection({
+  actions, generatingSkillId, activatingSkillId, generatingAllSkills,
+  onGenerateSkill, onActivateSkill, onDismiss, onGenerateAllSkills, onActivateAll,
+}) {
+  const grouped = {};
+  for (const a of actions) {
+    if (!grouped[a.status]) grouped[a.status] = [];
+    grouped[a.status].push(a);
+  }
+
+  const plannedAgentCount = actions.filter(
+    a => a.status === 'planned' && (a.assignee_type === 'agent' || a.assignee_type === 'hybrid')
+  ).length;
+  const readyCount = actions.filter(a => a.status === 'ready_for_review').length;
+  const activeCount = actions.filter(a => a.status === 'active').length;
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Zap size={16} className="text-amber-500" />
+          <span className="text-sm font-medium text-dark-text">Automation Actions</span>
+          <span className="text-xs text-secondary-text">({actions.length})</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {plannedAgentCount > 0 && (
+            <button
+              onClick={onGenerateAllSkills}
+              disabled={generatingAllSkills}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {generatingAllSkills ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+              Generate All Skills ({plannedAgentCount})
+            </button>
+          )}
+          {readyCount > 0 && (
+            <button
+              onClick={onActivateAll}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors flex items-center gap-1"
+            >
+              <CheckCircle size={12} />
+              Activate All ({readyCount})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Summary stats */}
+      <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-6 text-xs">
+        <span className="text-green-700">{activeCount} active</span>
+        <span className="text-blue-700">{readyCount} ready</span>
+        <span className="text-gray-600">{plannedAgentCount} planned</span>
+        <span className="text-gray-500">
+          {actions.filter(a => a.status === 'manual').length} manual
+        </span>
+      </div>
+
+      <div className="divide-y divide-gray-100">
+        {STATUS_ORDER.map(status => {
+          const group = grouped[status];
+          if (!group?.length) return null;
+
+          return (
+            <div key={status}>
+              <div className="px-4 py-2 bg-gray-50 text-xs font-semibold text-secondary-text uppercase tracking-wider">
+                {status.replace(/_/g, ' ')} ({group.length})
+              </div>
+              {group.map(action => (
+                <div key={action.id} className="px-4 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-dark-text">{action.title}</div>
+                    <div className="text-xs text-secondary-text mt-0.5 line-clamp-2">{action.description}</div>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded border ${ASSIGNEE_BADGE[action.assignee_type] || ASSIGNEE_BADGE.manual}`}>
+                        {action.assignee_type}
+                      </span>
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded ${STATUS_BADGE[action.status] || ''}`}>
+                        {action.status.replace(/_/g, ' ')}
+                      </span>
+                      {action.agent_key && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">
+                          {action.agent_key}
+                        </span>
+                      )}
+                      {action.effort && (
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded ${EFFORT_BADGE[action.effort] || ''}`}>
+                          {action.effort}
+                        </span>
+                      )}
+                      {action.impact && (
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded ${IMPACT_BADGE[action.impact] || ''}`}>
+                          {action.impact}
+                        </span>
+                      )}
+                      {action.estimated_time_saved && (
+                        <span className="text-[11px] text-secondary-text">{action.estimated_time_saved}</span>
+                      )}
+                      {action.source_sop && (
+                        <span className="text-[11px] text-secondary-text">Source: {action.source_sop}</span>
+                      )}
+                    </div>
+                    {action.agent_skill_prompt && action.status === 'ready_for_review' && (
+                      <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-800 max-h-24 overflow-y-auto">
+                        <div className="font-medium mb-1">Generated Skill Preview:</div>
+                        {action.agent_skill_prompt.slice(0, 300)}
+                        {action.agent_skill_prompt.length > 300 && '...'}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {action.status === 'planned' && (action.assignee_type === 'agent' || action.assignee_type === 'hybrid') && (
+                      <button
+                        onClick={() => onGenerateSkill(action.id)}
+                        disabled={generatingSkillId === action.id}
+                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {generatingSkillId === action.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                        Generate Skill
+                      </button>
+                    )}
+                    {action.status === 'ready_for_review' && (
+                      <button
+                        onClick={() => onActivateSkill(action.id)}
+                        disabled={activatingSkillId === action.id}
+                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-green-300 text-green-700 hover:bg-green-50 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {activatingSkillId === action.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                        Activate
+                      </button>
+                    )}
+                    {action.status !== 'dismissed' && action.status !== 'active' && (
+                      <button
+                        onClick={() => onDismiss(action.id)}
+                        className="px-2 py-1.5 text-xs text-secondary-text hover:text-red-600 transition-colors"
+                        title="Dismiss"
+                      >
+                        <XCircle size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
