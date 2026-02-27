@@ -6,8 +6,14 @@ const PLATFORM_ROLES = ['super-admin', 'platform_owner'];
 /**
  * Resolve the Anthropic API key for a request.
  *
- * Priority: tenant stored key → platform DB key → env fallback.
- * Platform admins can pass tenant_id in the body to act on behalf of a tenant.
+ * Priority chain:
+ *   1. Tenant stored key (encrypted in DB)
+ *   2. Platform DB key
+ *   3. ANTHROPIC_API_KEY env var
+ *
+ * The env fallback ensures local dev works without needing the production
+ * encryption key — tenant keys stored via deployed Alf can't be decrypted
+ * locally since environments use different CREDENTIAL_ENCRYPTION_KEYs.
  *
  * Returns { apiKey, keySource, effectiveTenantId } or throws with a user-facing message.
  */
@@ -22,31 +28,33 @@ export async function resolveApiKey(req, { tenantIdOverride } = {}) {
   let apiKey;
   let keySource;
 
-  // Try tenant-specific key first
+  // 1. Try tenant-specific key (encrypted in DB)
   if (effectiveTenantId) {
     try {
       apiKey = await getTenantApiKey(req.supabase, effectiveTenantId, 'anthropic');
-      keySource = 'tenant';
+      if (apiKey) keySource = 'tenant';
     } catch (err) {
       console.error('[resolveApiKey] Tenant key lookup failed:', err.message);
     }
   }
 
-  // No tenant context → try platform DB key, then env fallback
-  if (!apiKey && !effectiveTenantId) {
+  // 2. Try platform DB key
+  if (!apiKey) {
     try {
       apiKey = await getPlatformApiKey(req.supabase, 'anthropic');
-      keySource = 'platform_db';
+      if (apiKey) keySource = 'platform_db';
     } catch (err) { /* silent — fall through to env */ }
-    if (!apiKey) {
-      apiKey = process.env.ANTHROPIC_API_KEY;
-      keySource = 'env';
-    }
+  }
+
+  // 3. Env fallback (covers local dev where encryption keys don't match production)
+  if (!apiKey && process.env.ANTHROPIC_API_KEY) {
+    apiKey = process.env.ANTHROPIC_API_KEY;
+    keySource = 'env';
   }
 
   if (!apiKey) {
     const msg = effectiveTenantId
-      ? 'No API key configured for this tenant. Ask your platform admin to add one under Tenants > API Keys.'
+      ? 'No API key configured for this tenant. Ask your platform admin to add one under Tenants > API Keys, or set ANTHROPIC_API_KEY in the backend env.'
       : 'AI service not configured (no ANTHROPIC_API_KEY in env)';
     const error = new Error(msg);
     error.status = 403;

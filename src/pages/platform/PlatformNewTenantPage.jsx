@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, getFreshToken } from '../../lib/supabase';
 import { slugify } from '../../utils/slugify';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
 import { TIER_REGISTRY, TIER_KEYS, getTierDefaults } from '../../data/tierRegistry';
+import { DASHBOARD_TEMPLATES, TEMPLATE_KEYS, getTemplateConfigs } from '../../data/dashboardTemplates';
+
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
   key,
@@ -22,6 +25,7 @@ export default function PlatformNewTenantPage() {
       modules: defaults.modules,
       max_users: defaults.maxUsers,
       max_agents: 10,
+      dashboardTemplate: 'default',
     };
   });
   const [saving, setSaving] = useState(false);
@@ -89,6 +93,24 @@ export default function PlatformNewTenantPage() {
       setError(insertErr.message);
       setSaving(false);
       return;
+    }
+
+    // Apply dashboard template if not 'default' (default = no configs needed)
+    if (form.dashboardTemplate && form.dashboardTemplate !== 'default') {
+      try {
+        const templateConfigs = getTemplateConfigs(form.dashboardTemplate);
+        if (Object.keys(templateConfigs).length > 0) {
+          const token = await getFreshToken();
+          await fetch(`${BACKEND_URL}/api/dashboards/${data.id}/apply-template`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ configs: templateConfigs }),
+          });
+        }
+      } catch (err) {
+        // Non-blocking — tenant is created, template just didn't apply
+        console.warn('[NewTenant] Dashboard template apply failed:', err.message);
+      }
     }
 
     navigate(`/platform/tenants/${data.id}`);
@@ -195,6 +217,27 @@ export default function PlatformNewTenantPage() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Dashboard Template */}
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-dark-text mb-1">Dashboard Template</label>
+            <select
+              value={form.dashboardTemplate}
+              onChange={(e) => setForm({ ...form, dashboardTemplate: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            >
+              {TEMPLATE_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {DASHBOARD_TEMPLATES[key].label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-secondary-text mt-1">
+              {DASHBOARD_TEMPLATES[form.dashboardTemplate]?.description}
+            </p>
           </div>
         </div>
 

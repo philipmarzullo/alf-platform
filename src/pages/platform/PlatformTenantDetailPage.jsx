@@ -5,7 +5,8 @@ import {
   Puzzle, Bot, Lock, ToggleLeft, ToggleRight,
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
-  Plus, Mail, UserX, UserCheck, Palette, RefreshCw, ChevronRight,
+  Plus, Mail, UserX, UserCheck, Palette, RefreshCw, ChevronRight, BarChart3,
+  GripVertical,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
@@ -14,6 +15,7 @@ import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
 import { TIER_KEYS, TIER_REGISTRY } from '../../data/tierRegistry';
 import { buildDocumentPath, formatFileSize } from '../../utils/storagePaths';
+import { DASHBOARD_TEMPLATES, TEMPLATE_KEYS, getTemplateConfigs } from '../../data/dashboardTemplates';
 
 const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
   key,
@@ -34,6 +36,7 @@ const TABS = [
   { key: 'brand', label: 'Brand', icon: Palette },
   { key: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { key: 'automation', label: 'Automation', icon: FlaskConical },
+  { key: 'dashboards', label: 'Dashboards', icon: BarChart3 },
 ];
 
 // Which agents each module unlocks
@@ -53,6 +56,7 @@ export default function PlatformTenantDetailPage() {
   const [usage, setUsage] = useState([]);
   const [agentOverrides, setAgentOverrides] = useState([]);
   const [dbAgents, setDbAgents] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState({ total: 0, open: 0, lastGenerated: null });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -89,13 +93,14 @@ export default function PlatformTenantDetailPage() {
   async function loadData() {
     setLoading(true);
 
-    const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes] = await Promise.all([
+    const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes, dashActionsRes] = await Promise.all([
       supabase.from('alf_tenants').select('*').eq('id', id).single(),
       supabase.from('profiles').select('id, name, email, role, active').eq('tenant_id', id).order('name'),
       supabase.from('tenant_sites').select('*').eq('tenant_id', id).order('name'),
       supabase.from('alf_usage_logs').select('id, agent_key, tokens_input, tokens_output, created_at').eq('tenant_id', id).order('created_at', { ascending: false }).limit(100),
       supabase.from('tenant_agent_overrides').select('*').eq('tenant_id', id),
       supabase.from('alf_agent_definitions').select('*').order('agent_key'),
+      supabase.from('automation_actions').select('id, status, created_at').eq('tenant_id', id).eq('source', 'dashboard_action_plan').order('created_at', { ascending: false }),
     ]);
 
     if (tenantRes.error) {
@@ -123,6 +128,15 @@ export default function PlatformTenantDetailPage() {
     setUsage(usageRes.data || []);
     setAgentOverrides(overridesRes.data || []);
     setDbAgents(dbAgentsRes.data || []);
+
+    // Dashboard action plan stats
+    const dashActions = dashActionsRes.data || [];
+    setDashboardStats({
+      total: dashActions.length,
+      open: dashActions.filter((a) => a.status === 'open' || a.status === 'in_progress').length,
+      lastGenerated: dashActions[0]?.created_at || null,
+    });
+
     setLoading(false);
   }
 
@@ -552,6 +566,39 @@ export default function PlatformTenantDetailPage() {
             </div>
           </div>
 
+          {/* Dashboards & Action Plans */}
+          {tenant?.module_config?.dashboards && (
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <h2 className="text-sm font-semibold text-dark-text mb-3 flex items-center gap-2">
+                <Activity size={16} className="text-amber-500" />
+                Dashboards & Action Plans
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <span className="text-secondary-text">Module</span>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <div className="w-2 h-2 rounded-full bg-green-500" />
+                    <span className="font-medium text-dark-text">Enabled</span>
+                  </div>
+                </div>
+                <div>
+                  <span className="text-secondary-text">Action Plans</span>
+                  <div className="mt-1 font-medium text-dark-text">
+                    {dashboardStats.total} generated ({dashboardStats.open} open)
+                  </div>
+                </div>
+                <div>
+                  <span className="text-secondary-text">Last Generated</span>
+                  <div className="mt-1 font-medium text-dark-text">
+                    {dashboardStats.lastGenerated
+                      ? new Date(dashboardStats.lastGenerated).toLocaleDateString()
+                      : 'Never'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Users Table */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -720,6 +767,11 @@ export default function PlatformTenantDetailPage() {
       {/* Automation Tab */}
       {activeTab === 'automation' && (
         <AutomationTab tenantId={id} />
+      )}
+
+      {/* Dashboards Tab */}
+      {activeTab === 'dashboards' && (
+        <DashboardsTab tenantId={id} />
       )}
     </div>
   );
@@ -2934,6 +2986,459 @@ function RoadmapDetail({ roadmap }) {
           <div className="text-sm text-amber-900">{roadmap.recommended_first_action}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── Dashboards Tab ─── */
+
+const DASHBOARD_KEYS = ['home', 'operations', 'labor', 'quality', 'timekeeping', 'safety'];
+
+function DashboardsTab({ tenantId }) {
+  const [configs, setConfigs] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [editKey, setEditKey] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  // AI Recommendations state
+  const [recommending, setRecommending] = useState(false);
+  const [recommendations, setRecommendations] = useState(null);
+  const [recSummary, setRecSummary] = useState('');
+  const [acceptedRecs, setAcceptedRecs] = useState(new Set());
+  const [applyingRecs, setApplyingRecs] = useState(false);
+
+  const backendUrl = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+
+  useEffect(() => {
+    loadConfigs();
+  }, [tenantId]);
+
+  async function loadConfigs() {
+    setLoading(true);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${backendUrl}/api/dashboards/${tenantId}/config`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (res.ok) setConfigs(json.configs || {});
+    } catch (err) {
+      console.error('[DashboardsTab] Load error:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleApplyTemplate() {
+    if (!selectedTemplate) return;
+    setApplying(true);
+    setMessage(null);
+    try {
+      const templateConfigs = getTemplateConfigs(selectedTemplate);
+      const token = await getFreshToken();
+      const res = await fetch(`${backendUrl}/api/dashboards/${tenantId}/apply-template`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ configs: templateConfigs }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      setMessage({ type: 'success', text: `Template applied — ${json.applied} dashboard(s) configured` });
+      loadConfigs();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  function startEdit(key) {
+    setEditKey(key);
+    setEditDraft(JSON.stringify(configs[key] || {}, null, 2));
+  }
+
+  async function handleSaveEdit() {
+    if (!editKey) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const parsed = JSON.parse(editDraft);
+      const token = await getFreshToken();
+      const res = await fetch(`${backendUrl}/api/dashboards/${tenantId}/config/${editKey}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: parsed }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      setConfigs((prev) => ({ ...prev, [editKey]: json.config }));
+      setEditKey(null);
+      setEditDraft(null);
+      setMessage({ type: 'success', text: `${editKey} config saved` });
+      setTimeout(() => setMessage(null), 2000);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGetRecommendations() {
+    setRecommending(true);
+    setRecommendations(null);
+    setRecSummary('');
+    setAcceptedRecs(new Set());
+    setMessage(null);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${backendUrl}/api/dashboards/${tenantId}/config/recommend`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      setRecommendations(json.recommendations || []);
+      setRecSummary(json.summary || '');
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Recommendation failed: ' + err.message });
+    } finally {
+      setRecommending(false);
+    }
+  }
+
+  function toggleRec(idx) {
+    setAcceptedRecs((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }
+
+  async function handleApplyAccepted() {
+    if (acceptedRecs.size === 0 || !recommendations) return;
+    setApplyingRecs(true);
+    setMessage(null);
+
+    try {
+      // Group accepted recommendations by dashboard
+      const changes = {};
+      for (const idx of acceptedRecs) {
+        const rec = recommendations[idx];
+        if (!rec) continue;
+        const dash = rec.dashboard;
+        if (!changes[dash]) changes[dash] = { ...configs[dash] } || {};
+
+        const config = changes[dash];
+
+        if (rec.type === 'rename' && rec.target === 'kpi' && config.kpis) {
+          const kpi = config.kpis.find((k) => k.id === rec.targetId);
+          if (kpi) kpi.label = rec.suggestedLabel;
+        } else if (rec.type === 'rename' && rec.target === 'chart' && config.charts) {
+          const chart = config.charts.find((c) => c.id === rec.targetId);
+          if (chart) chart.label = rec.suggestedLabel;
+        } else if (rec.type === 'rename' && rec.target === 'heroMetric' && config.heroMetrics) {
+          const metric = config.heroMetrics.find((m) => m.id === rec.targetId);
+          if (metric) metric.label = rec.suggestedLabel;
+        } else if ((rec.type === 'hide' || rec.type === 'show') && rec.target === 'kpi' && config.kpis) {
+          const kpi = config.kpis.find((k) => k.id === rec.targetId);
+          if (kpi) kpi.visible = rec.suggestedVisible ?? (rec.type === 'show');
+        } else if ((rec.type === 'hide' || rec.type === 'show') && rec.target === 'chart' && config.charts) {
+          const chart = config.charts.find((c) => c.id === rec.targetId);
+          if (chart) chart.visible = rec.suggestedVisible ?? (rec.type === 'show');
+        }
+      }
+
+      // Save each changed dashboard
+      const token = await getFreshToken();
+      let applied = 0;
+      for (const [dash, config] of Object.entries(changes)) {
+        if (!config || Object.keys(config).length === 0) continue;
+        const res = await fetch(`${backendUrl}/api/dashboards/${tenantId}/config/${dash}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          setConfigs((prev) => ({ ...prev, [dash]: json.config }));
+          applied++;
+        }
+      }
+
+      setMessage({ type: 'success', text: `Applied ${acceptedRecs.size} recommendation(s) across ${applied} dashboard(s)` });
+      setRecommendations(null);
+      setAcceptedRecs(new Set());
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setApplyingRecs(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 size={20} className="text-amber-500 animate-spin" />
+      </div>
+    );
+  }
+
+  const configuredCount = DASHBOARD_KEYS.filter((k) => configs[k]).length;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-dark-text">Dashboard Configuration</h2>
+        <p className="text-sm text-secondary-text mt-1">
+          {configuredCount} of {DASHBOARD_KEYS.length} dashboards have custom configs. Unconfigured dashboards use default labels.
+        </p>
+      </div>
+
+      {message && (
+        <div className={`text-sm px-4 py-3 rounded-lg border ${
+          message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
+        }`}>
+          {message.text}
+        </div>
+      )}
+
+      {/* Template Selector */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h3 className="text-sm font-semibold text-dark-text mb-3">Apply Template</h3>
+        <p className="text-xs text-secondary-text mb-3">
+          Overwrites existing configs for dashboards defined in the template. Dashboards not in the template are left unchanged.
+        </p>
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <select
+              value={selectedTemplate}
+              onChange={(e) => setSelectedTemplate(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            >
+              <option value="">Select a template...</option>
+              {TEMPLATE_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {DASHBOARD_TEMPLATES[key].label} — {DASHBOARD_TEMPLATES[key].description}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleApplyTemplate}
+            disabled={!selectedTemplate || applying}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          >
+            {applying && <Loader2 size={14} className="animate-spin" />}
+            Apply
+          </button>
+        </div>
+      </div>
+
+      {/* AI Recommendations */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-semibold text-dark-text">AI Recommendations</h3>
+            <p className="text-xs text-secondary-text mt-0.5">
+              Analyze this tenant's data to suggest label renames, visibility changes, and reordering.
+            </p>
+          </div>
+          <button
+            onClick={handleGetRecommendations}
+            disabled={recommending}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          >
+            {recommending ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+            {recommending ? 'Analyzing...' : 'Get Recommendations'}
+          </button>
+        </div>
+
+        {recommendations && recommendations.length > 0 && (
+          <div className="space-y-3 mt-4">
+            {recSummary && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-sm text-amber-900">{recSummary}</p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {recommendations.map((rec, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                    acceptedRecs.has(idx)
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                  }`}
+                  onClick={() => toggleRec(idx)}
+                >
+                  <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                    acceptedRecs.has(idx) ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {acceptedRecs.has(idx) && <CheckCircle size={12} className="text-white" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-semibold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                        {rec.dashboard}
+                      </span>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                        rec.type === 'rename' ? 'bg-blue-50 text-blue-600' :
+                        rec.type === 'hide' ? 'bg-red-50 text-red-600' :
+                        rec.type === 'show' ? 'bg-green-50 text-green-600' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {rec.type}
+                      </span>
+                      <span className="text-xs text-secondary-text">{rec.target}: {rec.targetId}</span>
+                    </div>
+                    {rec.type === 'rename' && (
+                      <div className="mt-1 text-sm">
+                        <span className="text-secondary-text line-through">{rec.currentLabel}</span>
+                        <span className="mx-2 text-gray-400">&rarr;</span>
+                        <span className="text-dark-text font-medium">{rec.suggestedLabel}</span>
+                      </div>
+                    )}
+                    {(rec.type === 'hide' || rec.type === 'show') && (
+                      <div className="mt-1 text-sm text-dark-text">
+                        {rec.type === 'hide' ? 'Hide' : 'Show'} <strong>{rec.targetId}</strong>
+                      </div>
+                    )}
+                    <div className="mt-1 text-xs text-secondary-text">{rec.reason}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-secondary-text">
+                {acceptedRecs.size} of {recommendations.length} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setRecommendations(null); setAcceptedRecs(new Set()); }}
+                  className="px-3 py-1.5 text-xs font-medium text-secondary-text border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => setAcceptedRecs(new Set(recommendations.map((_, i) => i)))}
+                  className="px-3 py-1.5 text-xs font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={handleApplyAccepted}
+                  disabled={acceptedRecs.size === 0 || applyingRecs}
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                >
+                  {applyingRecs && <Loader2 size={12} className="animate-spin" />}
+                  Apply Selected
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {recommendations && recommendations.length === 0 && (
+          <div className="mt-3 text-sm text-secondary-text">
+            No recommendations — this tenant's dashboards are already well-configured for their data profile.
+          </div>
+        )}
+      </div>
+
+      {/* Per-Dashboard Config Cards */}
+      <div className="space-y-3">
+        {DASHBOARD_KEYS.map((key) => {
+          const config = configs[key];
+          const isEditing = editKey === key;
+
+          return (
+            <div key={key} className="bg-white rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3">
+                  <BarChart3 size={16} className={config ? 'text-amber-500' : 'text-gray-300'} />
+                  <div>
+                    <span className="text-sm font-medium text-dark-text capitalize">{key}</span>
+                    {config ? (
+                      <span className="ml-2 text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                        Configured
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-[10px] font-medium text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">
+                        Default
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {config && !isEditing && (
+                    <button
+                      onClick={() => {
+                        setConfigs((prev) => {
+                          const { [key]: _, ...rest } = prev;
+                          return rest;
+                        });
+                        // Delete by saving empty — or we could add a DELETE endpoint.
+                        // For now, just clear local state; the tenant portal will fall back to defaults.
+                      }}
+                      className="text-xs text-secondary-text hover:text-red-600 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  )}
+                  <button
+                    onClick={() => isEditing ? setEditKey(null) : startEdit(key)}
+                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                  >
+                    {isEditing ? 'Cancel' : 'Edit JSON'}
+                  </button>
+                </div>
+              </div>
+
+              {isEditing && (
+                <div className="border-t border-gray-100 p-4 space-y-3">
+                  <textarea
+                    value={editDraft}
+                    onChange={(e) => setEditDraft(e.target.value)}
+                    rows={12}
+                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 resize-y"
+                    spellCheck={false}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleSaveEdit}
+                      disabled={saving}
+                      className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                    >
+                      {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Summary of config contents */}
+              {config && !isEditing && (
+                <div className="border-t border-gray-100 px-4 py-3">
+                  <div className="flex flex-wrap gap-3 text-xs text-secondary-text">
+                    {config.kpis && <span>{config.kpis.length} KPIs</span>}
+                    {config.charts && <span>{config.charts.length} charts</span>}
+                    {config.heroMetrics && <span>{config.heroMetrics.length} hero metrics</span>}
+                    {config.workspaceCards && <span>{config.workspaceCards.length} workspace cards</span>}
+                    {config.version && <span>v{config.version}</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

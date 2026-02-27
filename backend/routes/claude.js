@@ -17,6 +17,7 @@ const AGENT_DEPT_MAP = {
   admin: ['admin', 'general'],
   qbu: ['general'],
   salesDeck: ['general'],
+  actionPlan: ['ops', 'general'],
 };
 
 /**

@@ -6,6 +6,7 @@ import claudeRouter from './routes/claude.js';
 import credentialsRouter from './routes/credentials.js';
 import platformCredentialsRouter from './routes/platformCredentials.js';
 import sopAnalysisRouter from './routes/sopAnalysis.js';
+import dashboardsRouter from './routes/dashboards.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,6 +47,7 @@ app.use('/api/claude', auth, claudeRouter);
 app.use('/api/credentials', auth, credentialsRouter);
 app.use('/api/platform-credentials', auth, platformCredentialsRouter);
 app.use('/api/sop-analysis', auth, sopAnalysisRouter);
+app.use('/api/dashboards', auth, dashboardsRouter);
 
 // --- 404 ---
 app.use((req, res) => {

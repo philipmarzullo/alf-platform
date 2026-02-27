@@ -30,7 +30,7 @@ export const TIER_REGISTRY = {
     key: 'galaxy',
     label: 'Galaxy',
     description: 'Full platform with automation and self-service pipeline',
-    modules: ['hr', 'finance', 'purchasing', 'sales', 'ops', 'qbu', 'salesDeck', 'automation'],
+    modules: ['hr', 'finance', 'purchasing', 'sales', 'ops', 'qbu', 'salesDeck', 'automation', 'dashboards'],
     maxUsers: 100,
     maxAgentCalls: 25_000,
     badge: { bg: 'bg-purple-50', text: 'text-purple-700' },

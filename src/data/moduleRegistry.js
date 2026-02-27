@@ -120,6 +120,22 @@ export const MODULE_REGISTRY = {
       { key: 'selfServicePipeline', label: 'Self-Service Analysis Pipeline' },
     ],
   },
+  dashboards: {
+    label: 'Dashboards',
+    description: 'Operational dashboards with KPI tracking and action plans',
+    icon: 'BarChart3',
+    pages: [
+      { key: 'operations', label: 'Operations', path: '/dashboards', default: true },
+      { key: 'labor', label: 'Labor', path: '/dashboards/labor' },
+      { key: 'quality', label: 'Quality', path: '/dashboards/quality' },
+      { key: 'timekeeping', label: 'Timekeeping', path: '/dashboards/timekeeping' },
+      { key: 'safety', label: 'Safety', path: '/dashboards/safety' },
+      { key: 'action-plans', label: 'Action Plans', path: '/dashboards/action-plans' },
+    ],
+    actions: [
+      { key: 'generateActionPlan', label: 'Generate Action Plan' },
+    ],
+  },
 };
 
 /**
