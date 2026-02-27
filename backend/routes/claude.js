@@ -8,6 +8,43 @@ const router = Router();
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 
+// Maps agent keys to departments for knowledge injection
+const AGENT_DEPT_MAP = {
+  hr: ['hr'],
+  finance: ['finance'],
+  purchasing: ['purchasing'],
+  sales: ['sales'],
+  ops: ['ops'],
+  admin: ['admin', 'general'],
+  qbu: ['general'],
+  salesDeck: ['general'],
+};
+
+/**
+ * Fetch extracted documents for a tenant + agent and build a context block.
+ */
+async function getKnowledgeContext(supabase, tenantId, agentKey) {
+  const departments = AGENT_DEPT_MAP[agentKey];
+  if (!departments) return null;
+
+  const { data: docs } = await supabase
+    .from('tenant_documents')
+    .select('file_name, doc_type, department, extracted_text')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'extracted')
+    .in('department', departments)
+    .order('doc_type')
+    .limit(20);
+
+  if (!docs?.length) return null;
+
+  const blocks = docs.map(d =>
+    `--- ${d.doc_type.toUpperCase()}: ${d.file_name} (${d.department}) ---\n${d.extracted_text}`
+  );
+
+  return `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+}
+
 /**
  * POST /api/claude
  *
@@ -66,6 +103,16 @@ router.post('/', rateLimit, async (req, res) => {
   }
 
   try {
+    // Enrich system prompt with tenant knowledge docs
+    let enrichedSystem = system || '';
+    if (effectiveTenantId && agent_key) {
+      const knowledgeCtx = await getKnowledgeContext(req.supabase, effectiveTenantId, agent_key);
+      if (knowledgeCtx) {
+        enrichedSystem = enrichedSystem + knowledgeCtx;
+        console.log(`[claude] Injected knowledge for ${agent_key} — ${knowledgeCtx.length} chars`);
+      }
+    }
+
     const anthropicResponse = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: {
@@ -75,7 +122,7 @@ router.post('/', rateLimit, async (req, res) => {
       },
       body: JSON.stringify({
         model,
-        system: system || undefined,
+        system: enrichedSystem || undefined,
         messages,
         max_tokens: max_tokens || 4096,
       }),
