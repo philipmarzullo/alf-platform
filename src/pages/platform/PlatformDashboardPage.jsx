@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import MetricCard from '../../components/shared/MetricCard';
+import { getTierBadge, TIER_REGISTRY } from '../../data/tierRegistry';
 
 export default function PlatformDashboardPage() {
   const navigate = useNavigate();
@@ -152,9 +153,11 @@ export default function PlatformDashboardPage() {
                   <div className="text-xs text-secondary-text">{tenant.slug}</div>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700 capitalize">
-                    {tenant.plan || 'free'}
-                  </span>
+                  {(() => { const b = getTierBadge(tenant.plan); return (
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full capitalize ${b.bg} ${b.text}`}>
+                      {TIER_REGISTRY[tenant.plan]?.label || tenant.plan || 'Melmac'}
+                    </span>
+                  ); })()}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-0.5 text-xs font-medium rounded-full capitalize ${

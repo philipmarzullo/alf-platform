@@ -4,8 +4,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { slugify } from '../../utils/slugify';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
-
-const PLAN_OPTIONS = ['free', 'starter', 'pro', 'enterprise'];
+import { TIER_REGISTRY, TIER_KEYS, getTierDefaults } from '../../data/tierRegistry';
 
 const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
   key,
@@ -14,19 +13,36 @@ const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
 
 export default function PlatformNewTenantPage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({
-    company_name: '',
-    slug: '',
-    plan: 'free',
-    modules: ['hr', 'finance', 'purchasing', 'sales', 'ops'],
-    max_users: 25,
-    max_agents: 10,
+  const [form, setForm] = useState(() => {
+    const defaults = getTierDefaults('melmac');
+    return {
+      company_name: '',
+      slug: '',
+      plan: 'melmac',
+      modules: defaults.modules,
+      max_users: defaults.maxUsers,
+      max_agents: 10,
+    };
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   function handleNameChange(name) {
     setForm({ ...form, company_name: name, slug: slugify(name) });
+  }
+
+  function handleTierChange(tierKey) {
+    const defaults = getTierDefaults(tierKey);
+    if (defaults) {
+      setForm((prev) => ({
+        ...prev,
+        plan: tierKey,
+        modules: defaults.modules,
+        max_users: defaults.maxUsers,
+      }));
+    } else {
+      setForm((prev) => ({ ...prev, plan: tierKey }));
+    }
   }
 
   function toggleModule(key) {
@@ -123,16 +139,17 @@ export default function PlatformNewTenantPage() {
             <p className="text-xs text-secondary-text mt-1">Auto-generated from company name. You can override it.</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-dark-text mb-1">Plan</label>
+            <label className="block text-sm font-medium text-dark-text mb-1">Tier</label>
             <select
               value={form.plan}
-              onChange={(e) => setForm({ ...form, plan: e.target.value })}
+              onChange={(e) => handleTierChange(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
             >
-              {PLAN_OPTIONS.map((p) => (
-                <option key={p} value={p} className="capitalize">{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+              {TIER_KEYS.map((key) => (
+                <option key={key} value={key}>{TIER_REGISTRY[key].label}</option>
               ))}
             </select>
+            <p className="text-xs text-secondary-text mt-1">{TIER_REGISTRY[form.plan]?.description}</p>
           </div>
         </div>
 

@@ -12,6 +12,7 @@ import DataTable from '../../components/shared/DataTable';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
+import { TIER_KEYS, TIER_REGISTRY } from '../../data/tierRegistry';
 import { buildDocumentPath, formatFileSize } from '../../utils/storagePaths';
 
 const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
@@ -109,7 +110,7 @@ export default function PlatformTenantDetailPage() {
 
     setTenant(t);
     setEditName(t.company_name);
-    setEditPlan(t.plan || 'free');
+    setEditPlan(t.plan || 'melmac');
     setEditStatus(t.status || 'active');
     setEditBrand({
       brand_display_name: t.brand_display_name || '',
@@ -492,8 +493,8 @@ export default function PlatformTenantDetailPage() {
                     onChange={(e) => setEditPlan(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
                   >
-                    {['free', 'starter', 'pro', 'enterprise'].map((p) => (
-                      <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                    {TIER_KEYS.map((key) => (
+                      <option key={key} value={key}>{TIER_REGISTRY[key].label}</option>
                     ))}
                   </select>
                 </div>

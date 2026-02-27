@@ -10,6 +10,7 @@ import MetricCard from '../../components/shared/MetricCard';
 import AlfIcon from '../../components/shared/AlfIcon';
 import { getAllSourceAgents } from '../../agents/registry';
 import { MODULE_REGISTRY } from '../../data/moduleRegistry';
+import { getTierBadge, TIER_REGISTRY } from '../../data/tierRegistry';
 
 const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
   key,
@@ -211,9 +212,11 @@ function TenantRow({ tenant, isExpanded, onToggle, onManage, sourceAgents }) {
           <div className="text-xs text-secondary-text">{tenant.slug}</div>
         </td>
         <td className="px-4 py-3">
-          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700 capitalize">
-            {tenant.plan || 'free'}
-          </span>
+          {(() => { const b = getTierBadge(tenant.plan); return (
+            <span className={`px-2 py-0.5 text-xs font-medium rounded-full capitalize ${b.bg} ${b.text}`}>
+              {TIER_REGISTRY[tenant.plan]?.label || tenant.plan || 'Melmac'}
+            </span>
+          ); })()}
         </td>
         <td className="px-4 py-3">
           <span className={`px-2 py-0.5 text-xs font-medium rounded-full capitalize ${
@@ -272,8 +275,8 @@ function TenantRow({ tenant, isExpanded, onToggle, onManage, sourceAgents }) {
                       </div>
                     )}
                     <div>
-                      <span className="text-secondary-text">Plan</span>
-                      <p className="text-dark-text capitalize">{tenant.plan || 'free'}</p>
+                      <span className="text-secondary-text">Tier</span>
+                      <p className="text-dark-text capitalize">{TIER_REGISTRY[tenant.plan]?.label || tenant.plan || 'Melmac'}</p>
                     </div>
                   </div>
                 </div>
