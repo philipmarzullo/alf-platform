@@ -11,17 +11,14 @@ import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
+import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
 import { buildDocumentPath, formatFileSize } from '../../utils/storagePaths';
 
-const MODULE_OPTIONS = [
-  { key: 'hr', label: 'HR', description: 'Benefits, payroll, leave management' },
-  { key: 'finance', label: 'Finance', description: 'AR, collections, budget tracking' },
-  { key: 'purchasing', label: 'Purchasing', description: 'Reorders, vendor management' },
-  { key: 'sales', label: 'Sales', description: 'Contracts, renewals, pipeline' },
-  { key: 'ops', label: 'Operations', description: 'Inspections, KPIs, incidents' },
-  { key: 'qbu', label: 'QBU Builder', description: 'Quarterly business update decks' },
-  { key: 'salesDeck', label: 'Sales Deck', description: 'Sales presentation builder' },
-];
+const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
+  key,
+  label: mod.label,
+  description: mod.description,
+}));
 
 const AGENT_MODULE_MAP = {
   hr: 'hr', finance: 'finance', purchasing: 'purchasing',
@@ -151,22 +148,64 @@ export default function PlatformTenantDetailPage() {
     setSavingModules(true);
     setError(null);
 
-    const currentModules = tenant.modules || [];
-    const newModules = currentModules.includes(moduleKey)
-      ? currentModules.filter((m) => m !== moduleKey)
-      : [...currentModules, moduleKey];
+    const currentConfig = tenant.module_config || {};
+    let newConfig;
 
-    // Write to whichever column the DB uses
-    const colName = tenant.enabled_modules !== undefined ? 'enabled_modules' : 'modules';
+    if (moduleKey in currentConfig) {
+      // Remove the module
+      const { [moduleKey]: _, ...rest } = currentConfig;
+      newConfig = rest;
+    } else {
+      // Add the module with all capabilities enabled
+      newConfig = { ...currentConfig, [moduleKey]: fullModuleConfig(moduleKey) };
+    }
+
+    const enabledModules = Object.keys(newConfig);
+
     const { error: updateErr } = await supabase
       .from('alf_tenants')
-      .update({ [colName]: newModules })
+      .update({
+        module_config: newConfig,
+        enabled_modules: enabledModules,
+      })
       .eq('id', id);
 
     if (updateErr) {
       setError(updateErr.message);
     } else {
-      setTenant((prev) => ({ ...prev, modules: newModules, ...(colName === 'enabled_modules' ? { enabled_modules: newModules } : {}) }));
+      setTenant((prev) => ({
+        ...prev,
+        modules: enabledModules,
+        enabled_modules: enabledModules,
+        module_config: newConfig,
+      }));
+    }
+    setSavingModules(false);
+  }
+
+  async function handleSaveModuleConfig(newConfig) {
+    setSavingModules(true);
+    setError(null);
+
+    const enabledModules = Object.keys(newConfig);
+
+    const { error: updateErr } = await supabase
+      .from('alf_tenants')
+      .update({
+        module_config: newConfig,
+        enabled_modules: enabledModules,
+      })
+      .eq('id', id);
+
+    if (updateErr) {
+      setError(updateErr.message);
+    } else {
+      setTenant((prev) => ({
+        ...prev,
+        modules: enabledModules,
+        enabled_modules: enabledModules,
+        module_config: newConfig,
+      }));
     }
     setSavingModules(false);
   }
@@ -638,6 +677,7 @@ export default function PlatformTenantDetailPage() {
           sourceAgents={sourceAgents}
           savingModules={savingModules}
           onToggleModule={handleToggleModule}
+          onSaveModuleConfig={handleSaveModuleConfig}
         />
       )}
 
@@ -678,56 +718,212 @@ export default function PlatformTenantDetailPage() {
 
 /* ─── Features Tab ─── */
 
-function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule }) {
-  const tenantModules = tenant.modules || [];
+function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSaveModuleConfig }) {
+  const moduleConfig = tenant.module_config || {};
+  const [expanded, setExpanded] = useState(null);
+
+  function toggleCapability(moduleKey, type, capKey) {
+    const current = moduleConfig[moduleKey] || { pages: [], actions: [] };
+    const list = current[type] || [];
+    const updated = list.includes(capKey)
+      ? list.filter((k) => k !== capKey)
+      : [...list, capKey];
+    const newModConfig = {
+      ...moduleConfig,
+      [moduleKey]: { ...current, [type]: updated },
+    };
+    onSaveModuleConfig(newModConfig);
+  }
+
+  function selectAll(moduleKey, type) {
+    const registry = MODULE_REGISTRY[moduleKey];
+    if (!registry) return;
+    const allKeys = type === 'pages'
+      ? registry.pages.map((p) => p.key)
+      : registry.actions.map((a) => a.key);
+    const newModConfig = {
+      ...moduleConfig,
+      [moduleKey]: { ...(moduleConfig[moduleKey] || {}), [type]: allKeys },
+    };
+    onSaveModuleConfig(newModConfig);
+  }
+
+  function deselectAll(moduleKey, type) {
+    const newModConfig = {
+      ...moduleConfig,
+      [moduleKey]: { ...(moduleConfig[moduleKey] || {}), [type]: [] },
+    };
+    onSaveModuleConfig(newModConfig);
+  }
 
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold text-dark-text">Feature Modules</h2>
         <p className="text-sm text-secondary-text mt-1">
-          Enable or disable modules for this tenant. Toggling a module controls which agents are available.
+          Enable or disable modules, then expand to configure individual pages and agent actions.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="space-y-3">
         {MODULE_OPTIONS.map((mod) => {
-          const isEnabled = tenantModules.includes(mod.key);
+          const isEnabled = mod.key in moduleConfig;
+          const isExpanded = expanded === mod.key;
+          const registry = MODULE_REGISTRY[mod.key];
+          const config = moduleConfig[mod.key] || { pages: [], actions: [] };
           const relatedAgents = getAgentsForModule(mod.key, sourceAgents);
+          const enabledPages = config.pages || [];
+          const enabledActions = config.actions || [];
 
           return (
             <div
               key={mod.key}
-              className={`bg-white rounded-lg border p-4 transition-colors ${
+              className={`bg-white rounded-lg border transition-colors ${
                 isEnabled ? 'border-amber-200' : 'border-gray-200'
               }`}
             >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
+              {/* Module header */}
+              <div className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
                   <Puzzle size={16} className={isEnabled ? 'text-amber-500' : 'text-gray-400'} />
-                  <h3 className="text-sm font-semibold text-dark-text">{mod.label}</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-dark-text">{mod.label}</h3>
+                    <p className="text-xs text-secondary-text">{mod.description}</p>
+                  </div>
                 </div>
-                <button
-                  onClick={() => onToggleModule(mod.key)}
-                  disabled={savingModules}
-                  className="text-gray-500 hover:text-amber-600 transition-colors disabled:opacity-50"
-                >
-                  {isEnabled
-                    ? <ToggleRight size={24} className="text-amber-600" />
-                    : <ToggleLeft size={24} className="text-gray-400" />
-                  }
-                </button>
+                <div className="flex items-center gap-2">
+                  {isEnabled && registry && (registry.pages.length > 1 || registry.actions.length > 1) && (
+                    <button
+                      onClick={() => setExpanded(isExpanded ? null : mod.key)}
+                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                      title={isExpanded ? 'Collapse' : 'Configure capabilities'}
+                    >
+                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onToggleModule(mod.key)}
+                    disabled={savingModules}
+                    className="text-gray-500 hover:text-amber-600 transition-colors disabled:opacity-50"
+                  >
+                    {isEnabled
+                      ? <ToggleRight size={24} className="text-amber-600" />
+                      : <ToggleLeft size={24} className="text-gray-400" />
+                    }
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-secondary-text mb-3">{mod.description}</p>
-              {relatedAgents.length > 0 && (
-                <div>
-                  <p className="text-xs text-secondary-text mb-1">Unlocks:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {relatedAgents.map((a) => (
-                      <span key={a.key} className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
-                        {a.name}
-                      </span>
-                    ))}
+
+              {/* Summary badges when collapsed but enabled */}
+              {isEnabled && !isExpanded && (
+                <div className="px-4 pb-3 flex flex-wrap gap-2 text-xs text-secondary-text">
+                  <span>{enabledPages.length}/{registry.pages.length} pages</span>
+                  <span className="text-gray-300">|</span>
+                  <span>{enabledActions.length}/{registry.actions.length} actions</span>
+                  {relatedAgents.length > 0 && (
+                    <>
+                      <span className="text-gray-300">|</span>
+                      {relatedAgents.map((a) => (
+                        <span key={a.key} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          {a.name}
+                        </span>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Expanded capability checkboxes */}
+              {isEnabled && isExpanded && (
+                <div className="border-t border-gray-100 px-4 py-3 space-y-4">
+                  {/* Pages */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-medium text-dark-text uppercase tracking-wide">Pages</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => selectAll(mod.key, 'pages')}
+                          disabled={savingModules}
+                          className="text-xs text-amber-600 hover:text-amber-700 disabled:opacity-50"
+                        >
+                          All
+                        </button>
+                        <button
+                          onClick={() => deselectAll(mod.key, 'pages')}
+                          disabled={savingModules}
+                          className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                        >
+                          None
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {registry.pages.map((page) => {
+                        const checked = enabledPages.includes(page.key);
+                        return (
+                          <label
+                            key={page.key}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${
+                              checked ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCapability(mod.key, 'pages', page.key)}
+                              disabled={savingModules}
+                              className="accent-amber-600"
+                            />
+                            {page.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-medium text-dark-text uppercase tracking-wide">Agent Actions</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => selectAll(mod.key, 'actions')}
+                          disabled={savingModules}
+                          className="text-xs text-amber-600 hover:text-amber-700 disabled:opacity-50"
+                        >
+                          All
+                        </button>
+                        <button
+                          onClick={() => deselectAll(mod.key, 'actions')}
+                          disabled={savingModules}
+                          className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                        >
+                          None
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {registry.actions.map((action) => {
+                        const checked = enabledActions.includes(action.key);
+                        return (
+                          <label
+                            key={action.key}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${
+                              checked ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCapability(mod.key, 'actions', action.key)}
+                              disabled={savingModules}
+                              className="accent-amber-600"
+                            />
+                            {action.label}
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}

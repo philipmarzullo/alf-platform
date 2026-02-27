@@ -3,18 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { slugify } from '../../utils/slugify';
+import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
 
 const PLAN_OPTIONS = ['free', 'starter', 'pro', 'enterprise'];
 
-const MODULE_OPTIONS = [
-  { key: 'hr', label: 'HR' },
-  { key: 'finance', label: 'Finance' },
-  { key: 'purchasing', label: 'Purchasing' },
-  { key: 'sales', label: 'Sales' },
-  { key: 'ops', label: 'Operations' },
-  { key: 'qbu', label: 'QBU Builder' },
-  { key: 'salesDeck', label: 'Sales Deck' },
-];
+const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
+  key,
+  label: mod.label,
+}));
 
 export default function PlatformNewTenantPage() {
   const navigate = useNavigate();
@@ -52,13 +48,20 @@ export default function PlatformNewTenantPage() {
     setSaving(true);
     setError(null);
 
+    // Build module_config from selected modules — all capabilities on by default
+    const moduleConfigObj = {};
+    for (const key of form.modules) {
+      moduleConfigObj[key] = fullModuleConfig(key);
+    }
+
     const { data, error: insertErr } = await supabase
       .from('alf_tenants')
       .insert({
         company_name: form.company_name.trim(),
         slug: form.slug || slugify(form.company_name),
         plan: form.plan,
-        modules: form.modules,
+        enabled_modules: form.modules,
+        module_config: moduleConfigObj,
         max_users: form.max_users,
         max_agents: form.max_agents,
         status: 'active',

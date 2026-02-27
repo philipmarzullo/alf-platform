@@ -9,13 +9,12 @@ import { supabase } from '../../lib/supabase';
 import MetricCard from '../../components/shared/MetricCard';
 import AlfIcon from '../../components/shared/AlfIcon';
 import { getAllSourceAgents } from '../../agents/registry';
+import { MODULE_REGISTRY } from '../../data/moduleRegistry';
 
-const MODULE_OPTIONS = [
-  { key: 'hr', label: 'HR' }, { key: 'finance', label: 'Finance' },
-  { key: 'purchasing', label: 'Purchasing' }, { key: 'sales', label: 'Sales' },
-  { key: 'ops', label: 'Operations' }, { key: 'qbu', label: 'QBU Builder' },
-  { key: 'salesDeck', label: 'Sales Deck' },
-];
+const MODULE_OPTIONS = Object.entries(MODULE_REGISTRY).map(([key, mod]) => ({
+  key,
+  label: mod.label,
+}));
 
 const AGENT_MODULE_MAP = {
   hr: 'hr', finance: 'finance', purchasing: 'purchasing',
