@@ -2449,6 +2449,9 @@ function AutomationTab({ tenantId }) {
                         {analysis?.status === 'failed' && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">Failed</span>
                         )}
+                        {analysis?.initiated_by_type === 'tenant' && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">Tenant-initiated</span>
+                        )}
                         {!analysis && (
                           <span className="text-xs text-secondary-text">Not analyzed</span>
                         )}
@@ -2491,6 +2494,10 @@ function AutomationTab({ tenantId }) {
                 {filterDept.charAt(0).toUpperCase() + filterDept.slice(1)} Department Roadmap
               </span>
             </div>
+            <div className="flex items-center gap-2">
+              {activeRoadmap?.initiated_by_type === 'tenant' && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">Tenant-initiated</span>
+              )}
             {deptHasAnalyses && (
               <button
                 onClick={() => handleGenerateRoadmap(filterDept)}
@@ -2501,6 +2508,7 @@ function AutomationTab({ tenantId }) {
                 {activeRoadmap ? 'Regenerate Roadmap' : 'Generate Roadmap'}
               </button>
             )}
+            </div>
           </div>
 
           {!deptHasAnalyses ? (
@@ -2667,6 +2675,11 @@ function ActionsSection({
                       )}
                       {action.source_sop && (
                         <span className="text-[11px] text-secondary-text">Source: {action.source_sop}</span>
+                      )}
+                      {action.initiated_by_type === 'tenant' && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                          Tenant-initiated
+                        </span>
                       )}
                     </div>
                     {action.agent_skill_prompt && action.status === 'ready_for_review' && (

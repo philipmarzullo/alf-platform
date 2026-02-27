@@ -200,11 +200,45 @@ function parseJsonResponse(data) {
   return JSON.parse(cleaned);
 }
 
-function requirePlatformAdmin(req, res) {
-  if (!PLATFORM_ROLES.includes(req.user?.role)) {
-    res.status(403).json({ error: 'Platform admin access required' });
+/**
+ * Dual access control: platform admins pass through, tenant admins pass
+ * if selfServicePipeline is enabled for the automation module.
+ *
+ * Sets req._isPlatformAdmin so routes can branch on caller type.
+ */
+async function requireAuthorizedUser(req, res) {
+  // Platform admin — always allowed
+  if (PLATFORM_ROLES.includes(req.user?.role)) {
+    req._isPlatformAdmin = true;
+    return true;
+  }
+
+  // Tenant user — must be admin + selfServicePipeline enabled
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'super-admin';
+  if (!isAdmin || !req.tenantId) {
+    res.status(403).json({ error: 'Platform or tenant admin access required' });
     return false;
   }
+
+  // Check module_config for selfServicePipeline
+  const { data: tenant, error } = await req.supabase
+    .from('alf_tenants')
+    .select('module_config')
+    .eq('id', req.tenantId)
+    .single();
+
+  if (error || !tenant) {
+    res.status(403).json({ error: 'Unable to verify tenant configuration' });
+    return false;
+  }
+
+  const automationActions = tenant.module_config?.automation?.actions || [];
+  if (!automationActions.includes('selfServicePipeline')) {
+    res.status(403).json({ error: 'Self-service pipeline is not enabled for your organization' });
+    return false;
+  }
+
+  req._isPlatformAdmin = false;
   return true;
 }
 
@@ -217,18 +251,23 @@ function requirePlatformAdmin(req, res) {
  * Body: { tenant_id, document_ids: [uuid] }
  */
 router.post('/analyze', rateLimit, async (req, res) => {
-  if (!requirePlatformAdmin(req, res)) return;
+  if (!(await requireAuthorizedUser(req, res))) return;
 
-  const { tenant_id, document_ids } = req.body;
+  const isPlatformAdmin = req._isPlatformAdmin;
+  const tenant_id = isPlatformAdmin ? req.body.tenant_id : req.tenantId;
+  const { document_ids } = req.body;
+  const initiatedByType = isPlatformAdmin ? 'platform' : 'tenant';
 
   if (!tenant_id || !document_ids?.length) {
     return res.status(400).json({ error: 'Required: tenant_id, document_ids (non-empty array)' });
   }
 
-  // Resolve API key for this tenant
+  // Resolve API key — platform admins override tenant_id, tenant admins use own key
   let apiKey, keySource;
   try {
-    ({ apiKey, keySource } = await resolveApiKey(req, { tenantIdOverride: tenant_id }));
+    ({ apiKey, keySource } = isPlatformAdmin
+      ? await resolveApiKey(req, { tenantIdOverride: tenant_id })
+      : await resolveApiKey(req));
   } catch (err) {
     return res.status(err.status || 403).json({ error: err.message });
   }
@@ -267,6 +306,7 @@ router.post('/analyze', rateLimit, async (req, res) => {
         tokens_output: 0,
         analyzed_by: req.user.id,
         error_message: null,
+        initiated_by_type: initiatedByType,
       }, { onConflict: 'document_id' })
       .select()
       .single();
@@ -308,6 +348,7 @@ router.post('/analyze', rateLimit, async (req, res) => {
           tokens_input: inputTokens,
           tokens_output: outputTokens,
           model: ANALYSIS_MODEL,
+          initiated_by_type: initiatedByType,
         })
         .then(({ error }) => {
           if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
@@ -336,9 +377,12 @@ router.post('/analyze', rateLimit, async (req, res) => {
  * Body: { tenant_id, department }
  */
 router.post('/roadmap', rateLimit, async (req, res) => {
-  if (!requirePlatformAdmin(req, res)) return;
+  if (!(await requireAuthorizedUser(req, res))) return;
 
-  const { tenant_id, department } = req.body;
+  const isPlatformAdmin = req._isPlatformAdmin;
+  const tenant_id = isPlatformAdmin ? req.body.tenant_id : req.tenantId;
+  const { department } = req.body;
+  const initiatedByType = isPlatformAdmin ? 'platform' : 'tenant';
 
   if (!tenant_id || !department) {
     return res.status(400).json({ error: 'Required: tenant_id, department' });
@@ -347,7 +391,9 @@ router.post('/roadmap', rateLimit, async (req, res) => {
   // Resolve API key
   let apiKey, keySource;
   try {
-    ({ apiKey, keySource } = await resolveApiKey(req, { tenantIdOverride: tenant_id }));
+    ({ apiKey, keySource } = isPlatformAdmin
+      ? await resolveApiKey(req, { tenantIdOverride: tenant_id })
+      : await resolveApiKey(req));
   } catch (err) {
     return res.status(err.status || 403).json({ error: err.message });
   }
@@ -386,6 +432,7 @@ router.post('/roadmap', rateLimit, async (req, res) => {
       tokens_output: 0,
       generated_by: req.user.id,
       error_message: null,
+      initiated_by_type: initiatedByType,
     }, { onConflict: 'tenant_id,department' })
     .select()
     .single();
@@ -425,6 +472,7 @@ router.post('/roadmap', rateLimit, async (req, res) => {
         tokens_input: inputTokens,
         tokens_output: outputTokens,
         model: ANALYSIS_MODEL,
+        initiated_by_type: initiatedByType,
       })
       .then(({ error }) => {
         if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
@@ -463,9 +511,12 @@ const DEPT_AGENT_MAP = {
  * Body: { tenant_id, roadmap_id }
  */
 router.post('/convert-to-actions', rateLimit, async (req, res) => {
-  if (!requirePlatformAdmin(req, res)) return;
+  if (!(await requireAuthorizedUser(req, res))) return;
 
-  const { tenant_id, roadmap_id } = req.body;
+  const isPlatformAdmin = req._isPlatformAdmin;
+  const tenant_id = isPlatformAdmin ? req.body.tenant_id : req.tenantId;
+  const { roadmap_id } = req.body;
+  const initiatedByType = isPlatformAdmin ? 'platform' : 'tenant';
 
   if (!tenant_id || !roadmap_id) {
     return res.status(400).json({ error: 'Required: tenant_id, roadmap_id' });
@@ -474,7 +525,9 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
   // Resolve API key
   let apiKey, keySource;
   try {
-    ({ apiKey, keySource } = await resolveApiKey(req, { tenantIdOverride: tenant_id }));
+    ({ apiKey, keySource } = isPlatformAdmin
+      ? await resolveApiKey(req, { tenantIdOverride: tenant_id })
+      : await resolveApiKey(req));
   } catch (err) {
     return res.status(err.status || 403).json({ error: err.message });
   }
@@ -537,6 +590,7 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
             effort: item.effort || null,
             impact: item.impact || null,
             estimated_time_saved: item.estimated_time_saved || null,
+            initiated_by_type: initiatedByType,
           })
           .select()
           .single();
@@ -557,6 +611,7 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
             tokens_input: inputTokens,
             tokens_output: outputTokens,
             model: ANALYSIS_MODEL,
+            initiated_by_type: initiatedByType,
           })
           .then(({ error }) => {
             if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
@@ -581,6 +636,7 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
             effort: item.effort || null,
             impact: item.impact || null,
             estimated_time_saved: item.estimated_time_saved || null,
+            initiated_by_type: initiatedByType,
           })
           .select()
           .single();
@@ -600,9 +656,12 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
  * Body: { tenant_id, action_id }
  */
 router.post('/generate-skill', rateLimit, async (req, res) => {
-  if (!requirePlatformAdmin(req, res)) return;
+  if (!(await requireAuthorizedUser(req, res))) return;
 
-  const { tenant_id, action_id } = req.body;
+  const isPlatformAdmin = req._isPlatformAdmin;
+  const tenant_id = isPlatformAdmin ? req.body.tenant_id : req.tenantId;
+  const { action_id } = req.body;
+  const initiatedByType = isPlatformAdmin ? 'platform' : 'tenant';
 
   if (!tenant_id || !action_id) {
     return res.status(400).json({ error: 'Required: tenant_id, action_id' });
@@ -611,7 +670,9 @@ router.post('/generate-skill', rateLimit, async (req, res) => {
   // Resolve API key
   let apiKey, keySource;
   try {
-    ({ apiKey, keySource } = await resolveApiKey(req, { tenantIdOverride: tenant_id }));
+    ({ apiKey, keySource } = isPlatformAdmin
+      ? await resolveApiKey(req, { tenantIdOverride: tenant_id })
+      : await resolveApiKey(req));
   } catch (err) {
     return res.status(err.status || 403).json({ error: err.message });
   }
@@ -686,6 +747,7 @@ router.post('/generate-skill', rateLimit, async (req, res) => {
         tokens_input: inputTokens,
         tokens_output: outputTokens,
         model: ANALYSIS_MODEL,
+        initiated_by_type: initiatedByType,
       })
       .then(({ error }) => {
         if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
@@ -711,9 +773,11 @@ router.post('/generate-skill', rateLimit, async (req, res) => {
  * Body: { tenant_id, action_id }
  */
 router.post('/activate-skill', rateLimit, async (req, res) => {
-  if (!requirePlatformAdmin(req, res)) return;
+  if (!(await requireAuthorizedUser(req, res))) return;
 
-  const { tenant_id, action_id } = req.body;
+  const isPlatformAdmin = req._isPlatformAdmin;
+  const tenant_id = isPlatformAdmin ? req.body.tenant_id : req.tenantId;
+  const { action_id } = req.body;
 
   if (!tenant_id || !action_id) {
     return res.status(400).json({ error: 'Required: tenant_id, action_id' });

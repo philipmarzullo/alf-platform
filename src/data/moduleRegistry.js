@@ -116,7 +116,9 @@ export const MODULE_REGISTRY = {
     pages: [
       { key: 'insights', label: 'Automation Insights', path: '/admin/automation', default: true },
     ],
-    actions: [],
+    actions: [
+      { key: 'selfServicePipeline', label: 'Self-Service Analysis Pipeline' },
+    ],
   },
 };
 
