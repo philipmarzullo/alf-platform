@@ -17,7 +17,10 @@ const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
 app.use(cors({
   origin(origin, cb) {
     // Allow requests with no origin (curl, server-to-server)
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    if (!origin) return cb(null, true);
+    // Allow any localhost port for local dev
+    if (/^http:\/\/localhost:\d+$/.test(origin)) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
     cb(new Error('CORS: origin not allowed'));
   },
   credentials: true,
