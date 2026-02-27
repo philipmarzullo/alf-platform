@@ -4,8 +4,8 @@ import {
   ArrowLeft, Save, Loader2, Users, MapPin, Activity,
   Puzzle, Bot, Lock, ToggleLeft, ToggleRight,
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
-  Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical,
-  Plus, Mail, UserX, UserCheck, Palette,
+  Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
+  Plus, Mail, UserX, UserCheck, Palette, RefreshCw, ChevronRight,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
@@ -32,6 +32,7 @@ const TABS = [
   { key: 'api-keys', label: 'API Keys', icon: Lock },
   { key: 'brand', label: 'Brand', icon: Palette },
   { key: 'knowledge', label: 'Knowledge', icon: BookOpen },
+  { key: 'automation', label: 'Automation', icon: FlaskConical },
 ];
 
 // Which agents each module unlocks
@@ -711,6 +712,11 @@ export default function PlatformTenantDetailPage() {
       {/* Knowledge Tab */}
       {activeTab === 'knowledge' && (
         <KnowledgeTab tenantId={id} />
+      )}
+
+      {/* Automation Tab */}
+      {activeTab === 'automation' && (
+        <AutomationTab tenantId={id} />
       )}
     </div>
   );
@@ -2040,6 +2046,557 @@ function DocumentTextPreview({ docId }) {
       <pre className="text-xs font-mono text-gray-700 bg-gray-50 rounded-lg p-3 max-h-64 overflow-auto whitespace-pre-wrap break-words">
         {preview}
       </pre>
+    </div>
+  );
+}
+
+/* ─── Automation Tab ─── */
+
+const AUTOMATION_DEPARTMENTS = [
+  { key: 'all', label: 'All' },
+  { key: 'hr', label: 'HR' },
+  { key: 'finance', label: 'Finance' },
+  { key: 'purchasing', label: 'Purchasing' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'ops', label: 'Ops' },
+  { key: 'admin', label: 'Admin' },
+  { key: 'general', label: 'General' },
+];
+
+const PRIORITY_BADGE = {
+  'quick-win': 'bg-green-50 text-green-700',
+  'medium-term': 'bg-amber-50 text-amber-700',
+  'long-term': 'bg-purple-50 text-purple-700',
+};
+
+const EFFORT_BADGE = {
+  low: 'bg-green-50 text-green-700',
+  medium: 'bg-amber-50 text-amber-700',
+  high: 'bg-red-50 text-red-700',
+};
+
+const IMPACT_BADGE = {
+  low: 'bg-gray-100 text-gray-600',
+  medium: 'bg-blue-50 text-blue-700',
+  high: 'bg-green-50 text-green-700',
+};
+
+async function sopAnalysisFetch(path, options = {}) {
+  const token = await getFreshToken();
+  if (!token) throw new Error('Not authenticated — please sign in again');
+
+  const backendUrl = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+  const res = await fetch(`${backendUrl}/api/sop-analysis${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...options.headers,
+    },
+  });
+
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || `Request failed: ${res.status}`);
+  return body;
+}
+
+function AutomationTab({ tenantId }) {
+  const [documents, setDocuments] = useState([]);
+  const [analyses, setAnalyses] = useState([]);
+  const [roadmaps, setRoadmaps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [filterDept, setFilterDept] = useState('all');
+  const [analyzingIds, setAnalyzingIds] = useState(new Set());
+  const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
+  const [expandedAnalysis, setExpandedAnalysis] = useState(null);
+  const [expandedRoadmap, setExpandedRoadmap] = useState(null);
+
+  useEffect(() => {
+    loadData();
+  }, [tenantId]);
+
+  async function loadData() {
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch SOP documents
+      const { data: docs } = await supabase
+        .from('tenant_documents')
+        .select('id, file_name, department, doc_type, char_count, status, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('doc_type', 'sop')
+        .eq('status', 'extracted')
+        .order('department')
+        .order('file_name');
+
+      setDocuments(docs || []);
+
+      // Fetch existing analyses and roadmaps
+      const results = await sopAnalysisFetch(`/results?tenant_id=${tenantId}`);
+      setAnalyses(results.analyses || []);
+      setRoadmaps(results.roadmaps || []);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  }
+
+  async function handleAnalyze(documentIds) {
+    setError(null);
+    setSuccess(null);
+    const newAnalyzing = new Set(analyzingIds);
+    documentIds.forEach(id => newAnalyzing.add(id));
+    setAnalyzingIds(newAnalyzing);
+
+    try {
+      await sopAnalysisFetch('/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ tenant_id: tenantId, document_ids: documentIds }),
+      });
+      setSuccess(`Analyzed ${documentIds.length} SOP${documentIds.length > 1 ? 's' : ''} successfully.`);
+      setTimeout(() => setSuccess(null), 4000);
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+    const cleared = new Set(analyzingIds);
+    documentIds.forEach(id => cleared.delete(id));
+    setAnalyzingIds(cleared);
+  }
+
+  async function handleGenerateRoadmap(department) {
+    setError(null);
+    setSuccess(null);
+    setGeneratingRoadmap(true);
+
+    try {
+      await sopAnalysisFetch('/roadmap', {
+        method: 'POST',
+        body: JSON.stringify({ tenant_id: tenantId, department }),
+      });
+      setSuccess(`Roadmap generated for ${department}.`);
+      setTimeout(() => setSuccess(null), 4000);
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+    setGeneratingRoadmap(false);
+  }
+
+  // Build lookup: document_id → analysis
+  const analysisMap = {};
+  for (const a of analyses) {
+    analysisMap[a.document_id] = a;
+  }
+
+  // Filter documents by department
+  const filtered = filterDept === 'all'
+    ? documents
+    : documents.filter(d => d.department === filterDept);
+
+  // Department counts
+  const deptCounts = { all: documents.length };
+  for (const d of documents) {
+    deptCounts[d.department] = (deptCounts[d.department] || 0) + 1;
+  }
+
+  // Summary metrics
+  const completedAnalyses = analyses.filter(a => a.status === 'completed');
+  const avgScore = completedAnalyses.length
+    ? Math.round(completedAnalyses.reduce((sum, a) => sum + (a.analysis?.automation_score || 0), 0) / completedAnalyses.length)
+    : 0;
+  const quickWinsCount = completedAnalyses.reduce(
+    (sum, a) => sum + (a.analysis?.quick_wins?.length || 0), 0
+  );
+
+  // Active department roadmap
+  const activeRoadmap = filterDept !== 'all'
+    ? roadmaps.find(r => r.department === filterDept && r.status === 'completed')
+    : null;
+  const deptHasAnalyses = filterDept !== 'all'
+    ? completedAnalyses.some(a => a.department === filterDept)
+    : false;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 size={20} className="text-amber-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+      )}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">{success}</div>
+      )}
+
+      {/* Summary Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="text-xs font-medium text-secondary-text mb-1">SOPs Available</div>
+          <div className="text-2xl font-semibold text-dark-text">{documents.length}</div>
+        </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="text-xs font-medium text-secondary-text mb-1">SOPs Analyzed</div>
+          <div className="text-2xl font-semibold text-dark-text">{completedAnalyses.length}</div>
+        </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="text-xs font-medium text-secondary-text mb-1">Avg Automation Score</div>
+          <div className="text-2xl font-semibold text-dark-text">{avgScore}<span className="text-sm text-secondary-text">/100</span></div>
+        </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="text-xs font-medium text-secondary-text mb-1">Quick Wins Found</div>
+          <div className="text-2xl font-semibold text-dark-text">{quickWinsCount}</div>
+        </div>
+      </div>
+
+      {/* Department Filter Pills */}
+      <div className="flex flex-wrap gap-2">
+        {AUTOMATION_DEPARTMENTS.map(dept => {
+          const count = deptCounts[dept.key] || 0;
+          const isActive = filterDept === dept.key;
+          return (
+            <button
+              key={dept.key}
+              onClick={() => setFilterDept(dept.key)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                isActive
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-gray-100 text-gray-600 border border-transparent hover:bg-gray-200'
+              }`}
+            >
+              {dept.label} {count > 0 && <span className="ml-1 opacity-60">({count})</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Batch Actions */}
+      {filtered.length > 0 && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => handleAnalyze(filtered.map(d => d.id))}
+            disabled={analyzingIds.size > 0}
+            className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {analyzingIds.size > 0 ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+            Analyze All ({filtered.length})
+          </button>
+          <span className="text-xs text-secondary-text">Analyzes {filterDept === 'all' ? 'all' : filterDept} SOPs with Claude</span>
+        </div>
+      )}
+
+      {/* SOP Documents List */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+          <FileText size={16} className="text-secondary-text" />
+          <span className="text-sm font-medium text-dark-text">SOP Documents</span>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-secondary-text">
+            No SOP documents found{filterDept !== 'all' ? ` for ${filterDept}` : ''}. Upload SOPs in the Knowledge tab first.
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filtered.map(doc => {
+              const analysis = analysisMap[doc.id];
+              const isAnalyzing = analyzingIds.has(doc.id);
+              const isExpanded = expandedAnalysis === doc.id;
+              const deptColor = DEPT_COLORS[doc.department] || '#6B7280';
+
+              return (
+                <div key={doc.id}>
+                  <div
+                    className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors cursor-pointer"
+                    style={{ borderLeftColor: deptColor, borderLeftWidth: '3px' }}
+                    onClick={() => analysis?.status === 'completed' && setExpandedAnalysis(isExpanded ? null : doc.id)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-dark-text truncate">{doc.file_name}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{doc.department}</span>
+                        {analysis?.status === 'completed' && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                            Score: {analysis.analysis?.automation_score}/100
+                          </span>
+                        )}
+                        {analysis?.status === 'failed' && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">Failed</span>
+                        )}
+                        {!analysis && (
+                          <span className="text-xs text-secondary-text">Not analyzed</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {analysis?.status === 'completed' && (
+                        <ChevronRight size={14} className={`text-secondary-text transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAnalyze([doc.id]); }}
+                        disabled={isAnalyzing}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {isAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                        {analysis ? 'Re-analyze' : 'Analyze'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded Analysis */}
+                  {isExpanded && analysis?.analysis && (
+                    <AnalysisDetail analysis={analysis.analysis} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Department Roadmap Section */}
+      {filterDept !== 'all' && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FlaskConical size={16} className="text-secondary-text" />
+              <span className="text-sm font-medium text-dark-text">
+                {filterDept.charAt(0).toUpperCase() + filterDept.slice(1)} Department Roadmap
+              </span>
+            </div>
+            {deptHasAnalyses && (
+              <button
+                onClick={() => handleGenerateRoadmap(filterDept)}
+                disabled={generatingRoadmap}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+              >
+                {generatingRoadmap ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {activeRoadmap ? 'Regenerate Roadmap' : 'Generate Roadmap'}
+              </button>
+            )}
+          </div>
+
+          {!deptHasAnalyses ? (
+            <div className="px-4 py-8 text-center text-sm text-secondary-text">
+              Analyze at least one SOP in this department to generate a roadmap.
+            </div>
+          ) : !activeRoadmap ? (
+            <div className="px-4 py-8 text-center text-sm text-secondary-text">
+              Click "Generate Roadmap" to create a phased automation plan for this department.
+            </div>
+          ) : (
+            <RoadmapDetail roadmap={activeRoadmap.roadmap} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnalysisDetail({ analysis }) {
+  return (
+    <div className="px-4 py-4 bg-gray-50 border-t border-gray-100 space-y-4">
+      {/* Summary */}
+      <div>
+        <div className="text-xs font-medium text-secondary-text mb-1">Summary</div>
+        <div className="text-sm text-dark-text">{analysis.summary}</div>
+      </div>
+
+      {/* Readiness */}
+      <div className="flex items-center gap-4">
+        <div>
+          <span className="text-xs text-secondary-text">Automation Score: </span>
+          <span className="text-sm font-semibold text-dark-text">{analysis.automation_score}/100</span>
+        </div>
+        <div>
+          <span className="text-xs text-secondary-text">Readiness: </span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            analysis.automation_readiness === 'high' ? 'bg-green-50 text-green-700' :
+            analysis.automation_readiness === 'medium' ? 'bg-amber-50 text-amber-700' :
+            'bg-red-50 text-red-700'
+          }`}>
+            {analysis.automation_readiness}
+          </span>
+        </div>
+      </div>
+
+      {/* Manual Steps */}
+      {analysis.manual_steps?.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-secondary-text mb-2">Manual Steps ({analysis.manual_steps.length})</div>
+          <div className="space-y-1">
+            {analysis.manual_steps.map((step, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <span className="text-secondary-text shrink-0 w-5 text-right">{step.step_number}.</span>
+                <span className="text-dark-text flex-1">{step.description}</span>
+                <span className="text-secondary-text shrink-0">{step.frequency}</span>
+                <span className="text-secondary-text shrink-0">{step.current_effort_minutes}min</span>
+                <span className={`shrink-0 px-1.5 py-0.5 rounded ${EFFORT_BADGE[step.complexity] || 'bg-gray-100 text-gray-600'}`}>
+                  {step.complexity}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Automation Candidates */}
+      {analysis.automation_candidates?.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-secondary-text mb-2">Automation Candidates ({analysis.automation_candidates.length})</div>
+          <div className="space-y-2">
+            {analysis.automation_candidates.map((cand, i) => (
+              <div key={i} className="bg-white rounded-lg border border-gray-200 p-3">
+                <div className="text-sm text-dark-text mb-1">{cand.description}</div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className={`px-2 py-0.5 rounded-full ${PRIORITY_BADGE[cand.priority] || 'bg-gray-100 text-gray-600'}`}>
+                    {cand.priority}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full ${EFFORT_BADGE[cand.effort_to_automate] || ''}`}>
+                    Effort: {cand.effort_to_automate}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full ${IMPACT_BADGE[cand.impact] || ''}`}>
+                    Impact: {cand.impact}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                    {cand.method}
+                  </span>
+                  {cand.estimated_time_saved_minutes_per_occurrence > 0 && (
+                    <span className="text-secondary-text">
+                      Saves ~{cand.estimated_time_saved_minutes_per_occurrence}min/occurrence
+                    </span>
+                  )}
+                </div>
+                {cand.suggested_tools?.length > 0 && (
+                  <div className="mt-1 text-xs text-secondary-text">
+                    Tools: {cand.suggested_tools.join(', ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quick Wins */}
+      {analysis.quick_wins?.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-secondary-text mb-1">Quick Wins</div>
+          <ul className="list-disc list-inside text-xs text-dark-text space-y-0.5">
+            {analysis.quick_wins.map((qw, i) => <li key={i}>{qw}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Long-term Items */}
+      {analysis.long_term_items?.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-secondary-text mb-1">Long-term Items</div>
+          <ul className="list-disc list-inside text-xs text-dark-text space-y-0.5">
+            {analysis.long_term_items.map((lt, i) => <li key={i}>{lt}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoadmapDetail({ roadmap }) {
+  if (!roadmap) return null;
+
+  return (
+    <div className="px-4 py-4 space-y-4">
+      {/* Summary */}
+      <div>
+        <div className="text-sm text-dark-text">{roadmap.summary}</div>
+        <div className="flex items-center gap-4 mt-2">
+          <span className="text-xs text-secondary-text">
+            Overall Score: <strong>{roadmap.overall_automation_score}/100</strong>
+          </span>
+          <span className="text-xs text-secondary-text">
+            SOPs Analyzed: <strong>{roadmap.total_sops_analyzed}</strong>
+          </span>
+          {roadmap.total_estimated_monthly_time_saved && (
+            <span className="text-xs text-secondary-text">
+              Est. Monthly Savings: <strong>{roadmap.total_estimated_monthly_time_saved}</strong>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Phases */}
+      {roadmap.phases?.map((phase, pi) => (
+        <div key={pi}>
+          <div className="text-xs font-semibold text-dark-text mb-2 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${
+              phase.phase === 'quick-wins' ? 'bg-green-500' :
+              phase.phase === 'medium-term' ? 'bg-amber-500' : 'bg-purple-500'
+            }`} />
+            {phase.label}
+          </div>
+          {phase.items?.length > 0 ? (
+            <div className="space-y-2 ml-4">
+              {phase.items.map((item, ii) => (
+                <div key={ii} className="flex items-start gap-3 text-xs">
+                  <div className="flex-1">
+                    <div className="text-dark-text">{item.description}</div>
+                    {item.source_sop && (
+                      <div className="text-secondary-text mt-0.5">Source: {item.source_sop}</div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.effort && (
+                      <span className={`px-1.5 py-0.5 rounded ${EFFORT_BADGE[item.effort] || 'bg-gray-100 text-gray-600'}`}>
+                        {item.effort}
+                      </span>
+                    )}
+                    {item.impact && (
+                      <span className={`px-1.5 py-0.5 rounded ${IMPACT_BADGE[item.impact] || 'bg-gray-100 text-gray-600'}`}>
+                        {item.impact}
+                      </span>
+                    )}
+                    {item.estimated_time_saved && (
+                      <span className="text-secondary-text">{item.estimated_time_saved}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="ml-4 text-xs text-secondary-text italic">No items in this phase.</div>
+          )}
+        </div>
+      ))}
+
+      {/* Dependencies */}
+      {roadmap.dependencies?.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-dark-text mb-1">Dependencies</div>
+          <div className="space-y-1 ml-4">
+            {roadmap.dependencies.map((dep, i) => (
+              <div key={i} className="text-xs text-secondary-text">
+                <strong>{dep.item}</strong> depends on <strong>{dep.depends_on}</strong> — {dep.reason}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommended First Action */}
+      {roadmap.recommended_first_action && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="text-xs font-semibold text-amber-800 mb-1">Recommended First Action</div>
+          <div className="text-sm text-amber-900">{roadmap.recommended_first_action}</div>
+        </div>
+      )}
     </div>
   );
 }

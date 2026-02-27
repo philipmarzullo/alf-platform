@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import rateLimit from '../middleware/rateLimit.js';
-import { getTenantApiKey } from './credentials.js';
-import { getPlatformApiKey } from './platformCredentials.js';
+import { resolveApiKey } from '../lib/resolveApiKey.js';
 
 const router = Router();
 
@@ -61,45 +60,13 @@ router.post('/', rateLimit, async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields: model, messages' });
   }
 
-  // Resolve effective tenant: profile tenant_id, or body override for platform admins
-  const PLATFORM_ROLES = ['super-admin', 'platform_owner'];
-  let effectiveTenantId = req.tenantId;
-
-  if (!effectiveTenantId && req.body.tenant_id && PLATFORM_ROLES.includes(req.user?.role)) {
-    effectiveTenantId = req.body.tenant_id;
-  }
-
-  // Tenant-aware key lookup: tenant requests use stored keys, platform admin falls back to env
-  let apiKey;
-  let keySource;
-
-  if (effectiveTenantId) {
-    try {
-      apiKey = await getTenantApiKey(req.supabase, effectiveTenantId, 'anthropic');
-      keySource = 'tenant';
-    } catch (err) {
-      console.error('[claude] Tenant key lookup failed:', err.message);
-    }
-  }
-
-  // No tenant context → try platform DB key, then env fallback
-  if (!apiKey && !effectiveTenantId) {
-    try {
-      apiKey = await getPlatformApiKey(req.supabase, 'anthropic');
-      keySource = 'platform_db';
-    } catch (err) { /* silent — fall through to env */ }
-    if (!apiKey) {
-      apiKey = process.env.ANTHROPIC_API_KEY;
-      keySource = 'env';
-    }
-  }
-
-  if (!apiKey) {
-    const msg = effectiveTenantId
-      ? 'No API key configured for this tenant. Ask your platform admin to add one under Tenants > API Keys.'
-      : 'AI service not configured (no ANTHROPIC_API_KEY in env)';
-    console.error(`[claude] No API key — tenant: ${effectiveTenantId || 'platform'}`);
-    return res.status(403).json({ error: msg });
+  // Resolve API key (tenant → platform DB → env fallback)
+  let apiKey, keySource, effectiveTenantId;
+  try {
+    ({ apiKey, keySource, effectiveTenantId } = await resolveApiKey(req));
+  } catch (err) {
+    console.error(`[claude] No API key — tenant: ${req.tenantId || 'platform'}`);
+    return res.status(err.status || 403).json({ error: err.message });
   }
 
   try {

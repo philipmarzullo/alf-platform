@@ -109,6 +109,15 @@ export const MODULE_REGISTRY = {
       { key: 'generateDeck', label: 'Generate Sales Deck' },
     ],
   },
+  automation: {
+    label: 'Automation Insights',
+    description: 'AI-powered SOP analysis and automation roadmaps',
+    icon: 'Zap',
+    pages: [
+      { key: 'insights', label: 'Automation Insights', path: '/admin/automation', default: true },
+    ],
+    actions: [],
+  },
 };
 
 /**
