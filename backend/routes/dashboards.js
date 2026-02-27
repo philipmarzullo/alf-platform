@@ -757,6 +757,288 @@ router.post('/:tenantId/config/recommend', rateLimit, async (req, res) => {
   }
 });
 
+// ─── User Dashboard Config (Per-User Overrides + 3-Tier Resolution) ─────────
+
+const VALID_DASHBOARD_KEYS = ['home', 'operations', 'labor', 'quality', 'timekeeping', 'safety'];
+
+/**
+ * GET /api/dashboards/:tenantId/user-config
+ *
+ * Returns all dashboard configs resolved through 3-tier chain:
+ * user_dashboard_configs → dashboard_configs → registry defaults.
+ * Response: { configs: { home: {...}, ... }, sources: { home: 'user'|'tenant'|'default', ... } }
+ */
+router.get('/:tenantId/user-config', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+  const userId = req.user?.id;
+
+  if (!effectiveTenantId || !userId) {
+    return res.status(400).json({ error: 'tenant_id and authenticated user required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    // Fetch tenant configs + user configs in parallel
+    const [tenantRes, userRes] = await Promise.all([
+      req.supabase.from('dashboard_configs').select('dashboard_key, config').eq('tenant_id', effectiveTenantId),
+      req.supabase.from('user_dashboard_configs').select('dashboard_key, config').eq('tenant_id', effectiveTenantId).eq('user_id', userId),
+    ]);
+
+    if (tenantRes.error) throw tenantRes.error;
+    if (userRes.error) throw userRes.error;
+
+    const tenantMap = {};
+    for (const row of (tenantRes.data || [])) tenantMap[row.dashboard_key] = row.config;
+
+    const userMap = {};
+    for (const row of (userRes.data || [])) userMap[row.dashboard_key] = row.config;
+
+    // Build merged configs + source indicators
+    const configs = {};
+    const sources = {};
+
+    for (const key of VALID_DASHBOARD_KEYS) {
+      if (userMap[key]) {
+        configs[key] = userMap[key];
+        sources[key] = 'user';
+      } else if (tenantMap[key]) {
+        configs[key] = tenantMap[key];
+        sources[key] = 'tenant';
+      } else {
+        sources[key] = 'default';
+        // No config — frontend will use registry defaults
+      }
+    }
+
+    res.json({ configs, sources });
+  } catch (err) {
+    console.error('[dashboards] User config fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch user dashboard configs' });
+  }
+});
+
+/**
+ * PUT /api/dashboards/:tenantId/user-config/:dashboardKey
+ *
+ * Save a per-user config override.
+ */
+router.put('/:tenantId/user-config/:dashboardKey', async (req, res) => {
+  const { tenantId, dashboardKey } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+  const userId = req.user?.id;
+
+  if (!effectiveTenantId || !userId) {
+    return res.status(400).json({ error: 'tenant_id and authenticated user required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  if (!VALID_DASHBOARD_KEYS.includes(dashboardKey)) {
+    return res.status(400).json({ error: `Invalid dashboard key. Must be one of: ${VALID_DASHBOARD_KEYS.join(', ')}` });
+  }
+
+  const config = req.body.config;
+  if (!config || typeof config !== 'object') {
+    return res.status(400).json({ error: 'config object required in request body' });
+  }
+
+  try {
+    const { data, error } = await req.supabase
+      .from('user_dashboard_configs')
+      .upsert({
+        user_id: userId,
+        tenant_id: effectiveTenantId,
+        dashboard_key: dashboardKey,
+        config,
+      }, {
+        onConflict: 'user_id,tenant_id,dashboard_key',
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ config: data.config, source: 'user' });
+  } catch (err) {
+    console.error('[dashboards] User config save error:', err.message);
+    res.status(500).json({ error: 'Failed to save user dashboard config' });
+  }
+});
+
+/**
+ * DELETE /api/dashboards/:tenantId/user-config/:dashboardKey
+ *
+ * Reset user override — falls back to tenant defaults.
+ */
+router.delete('/:tenantId/user-config/:dashboardKey', async (req, res) => {
+  const { tenantId, dashboardKey } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+  const userId = req.user?.id;
+
+  if (!effectiveTenantId || !userId) {
+    return res.status(400).json({ error: 'tenant_id and authenticated user required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  if (!VALID_DASHBOARD_KEYS.includes(dashboardKey)) {
+    return res.status(400).json({ error: `Invalid dashboard key. Must be one of: ${VALID_DASHBOARD_KEYS.join(', ')}` });
+  }
+
+  try {
+    const { error } = await req.supabase
+      .from('user_dashboard_configs')
+      .delete()
+      .eq('user_id', userId)
+      .eq('tenant_id', effectiveTenantId)
+      .eq('dashboard_key', dashboardKey);
+
+    if (error) throw error;
+
+    res.json({ deleted: true, dashboardKey });
+  } catch (err) {
+    console.error('[dashboards] User config delete error:', err.message);
+    res.status(500).json({ error: 'Failed to delete user dashboard config' });
+  }
+});
+
+// ─── Dashboard Shares ───────────────────────────────────────────────────────
+
+/**
+ * POST /api/dashboards/:tenantId/shares
+ *
+ * Admin shares a dashboard view with a non-admin user.
+ */
+router.post('/:tenantId/shares', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  const isPlatform = PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin && !isPlatform) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  const { dashboardKey, sharedWith } = req.body;
+  if (!dashboardKey || !sharedWith) {
+    return res.status(400).json({ error: 'dashboardKey and sharedWith (user ID) required' });
+  }
+
+  if (!VALID_DASHBOARD_KEYS.includes(dashboardKey)) {
+    return res.status(400).json({ error: `Invalid dashboard key` });
+  }
+
+  try {
+    const { data, error } = await req.supabase
+      .from('dashboard_shares')
+      .upsert({
+        tenant_id: effectiveTenantId,
+        dashboard_key: dashboardKey,
+        shared_by: req.user.id,
+        shared_with: sharedWith,
+        permissions: 'view',
+      }, {
+        onConflict: 'tenant_id,dashboard_key,shared_with',
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ share: data });
+  } catch (err) {
+    console.error('[dashboards] Share create error:', err.message);
+    res.status(500).json({ error: 'Failed to create share' });
+  }
+});
+
+/**
+ * GET /api/dashboards/:tenantId/shares
+ *
+ * Admins see shares they created; regular users see shares directed at them.
+ */
+router.get('/:tenantId/shares', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+  const userId = req.user?.id;
+
+  if (!effectiveTenantId || !userId) {
+    return res.status(400).json({ error: 'tenant_id and authenticated user required' });
+  }
+
+  try {
+    const isAdmin = ['admin', 'super-admin'].includes(req.user?.role) || PLATFORM_ROLES.includes(req.user?.role);
+
+    let query;
+    if (isAdmin) {
+      // Admins see all shares for the tenant
+      query = req.supabase
+        .from('dashboard_shares')
+        .select('*, shared_with_profile:profiles!dashboard_shares_shared_with_fkey(id, full_name, email)')
+        .eq('tenant_id', effectiveTenantId);
+    } else {
+      // Regular users see only shares directed at them
+      query = req.supabase
+        .from('dashboard_shares')
+        .select('*')
+        .eq('tenant_id', effectiveTenantId)
+        .eq('shared_with', userId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    res.json({ shares: data || [] });
+  } catch (err) {
+    console.error('[dashboards] Shares fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch shares' });
+  }
+});
+
+/**
+ * DELETE /api/dashboards/:tenantId/shares/:shareId
+ *
+ * Revoke a share. Only the admin who created it (or platform owner) can revoke.
+ */
+router.delete('/:tenantId/shares/:shareId', async (req, res) => {
+  const { tenantId, shareId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  const isPlatform = PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin && !isPlatform) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  try {
+    let query = req.supabase
+      .from('dashboard_shares')
+      .delete()
+      .eq('id', shareId)
+      .eq('tenant_id', effectiveTenantId);
+
+    // Non-platform admins can only delete their own shares
+    if (!isPlatform) {
+      query = query.eq('shared_by', req.user.id);
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('[dashboards] Share delete error:', err.message);
+    res.status(500).json({ error: 'Failed to delete share' });
+  }
+});
+
 // ─── Dashboard Config CRUD ───────────────────────────────────────────────────
 
 /**
