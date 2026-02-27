@@ -347,6 +347,8 @@ export default function PlatformTenantDetailPage() {
   }
 
   function setTab(tabKey) {
+    setError(null);
+    setSaved(false);
     setSearchParams({ tab: tabKey }, { replace: true });
   }
 
