@@ -1621,7 +1621,7 @@ function KnowledgeTab({ tenantId }) {
     setError(null);
     const { data, error: err } = await supabase
       .from('tenant_documents')
-      .select('id, file_name, file_type, file_size, department, doc_type, char_count, page_count, status, title, description, created_at')
+      .select('id, file_name, file_type, file_size, department, doc_type, char_count, page_count, status, title, description, created_at, deleted_at')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
 
@@ -1908,7 +1908,7 @@ function KnowledgeTab({ tenantId }) {
             return (
               <div
                 key={doc.id}
-                className="bg-white rounded-lg border border-gray-200 overflow-hidden"
+                className={`bg-white rounded-lg border border-gray-200 overflow-hidden${doc.deleted_at ? ' opacity-60' : ''}`}
               >
                 <div className="px-4 py-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1925,6 +1925,11 @@ function KnowledgeTab({ tenantId }) {
                         <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600 capitalize">
                           {doc.department}
                         </span>
+                        {doc.deleted_at && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-50 text-red-700">
+                            Deleted by tenant
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-xs text-secondary-text">
                         <span>{formatFileSize(doc.file_size)}</span>
@@ -1949,7 +1954,7 @@ function KnowledgeTab({ tenantId }) {
 
                     {confirmDelete === doc.id ? (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-red-600">Delete?</span>
+                        <span className="text-xs text-red-600">Permanently delete?</span>
                         <button
                           onClick={() => handleDelete(doc.id)}
                           disabled={deleting === doc.id}
@@ -1968,7 +1973,7 @@ function KnowledgeTab({ tenantId }) {
                       <button
                         onClick={() => setConfirmDelete(doc.id)}
                         className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                        title="Delete document"
+                        title="Permanently delete document"
                       >
                         <Trash2 size={16} />
                       </button>
