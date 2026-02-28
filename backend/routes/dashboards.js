@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import rateLimit from '../middleware/rateLimit.js';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
+import { getUserScopedJobIds, intersectJobIds } from '../lib/scopedJobs.js';
+import { getUserTemplate } from '../lib/userTemplate.js';
 
 const router = Router();
 
@@ -15,8 +17,9 @@ const PLATFORM_ROLES = ['super-admin', 'platform_owner'];
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
 
-function cacheKey(tenantId, domain, filters) {
-  return `dashboard:${tenantId}:${domain}:${JSON.stringify(filters)}`;
+function cacheKey(tenantId, domain, filters, userId) {
+  const userPart = userId ? `:u:${userId}` : '';
+  return `dashboard:${tenantId}:${domain}${userPart}:${JSON.stringify(filters)}`;
 }
 
 function getCached(key) {
@@ -324,10 +327,15 @@ router.post('/:tenantId/action-plan', rateLimit, async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
+  // Apply user site scoping to action plan generation
+  const requestedJobIds = req.body.jobIds || null;
+  const scopedJobIds = await getUserScopedJobIds(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+  const effectiveJobIds = intersectJobIds(scopedJobIds, requestedJobIds);
+
   const filters = {
     dateFrom: req.body.dateFrom || null,
     dateTo: req.body.dateTo || null,
-    jobIds: req.body.jobIds || null,
+    jobIds: effectiveJobIds,
   };
 
   // Resolve API key
@@ -778,13 +786,21 @@ router.get('/:tenantId/home-summary', async (req, res) => {
   }
 
   // No date filtering by default — show all available data
+  const requestedJobIds = req.query.jobIds ? req.query.jobIds.split(',') : null;
+
+  // Apply user site scoping — intersect with any explicit filter
+  const scopedJobIds = await getUserScopedJobIds(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+  const effectiveJobIds = intersectJobIds(scopedJobIds, requestedJobIds);
+
   const filters = {
     dateFrom: req.query.dateFrom || null,
     dateTo: req.query.dateTo || null,
-    jobIds: req.query.jobIds ? req.query.jobIds.split(',') : null,
+    jobIds: effectiveJobIds,
   };
 
-  const key = cacheKey(effectiveTenantId, 'home-summary', filters);
+  // Include userId in cache key when user has site scoping
+  const userId = scopedJobIds ? req.user.id : null;
+  const key = cacheKey(effectiveTenantId, 'home-summary', filters, userId);
   const cached = getCached(key);
   if (cached) return res.json(cached);
 
@@ -974,7 +990,14 @@ router.get('/:tenantId/home-summary', async (req, res) => {
         totalBudget,
         totalActual,
         laborVariance,
+        totalOtHours,
+        totalAudits,
+        totalCAs,
+        caRatio,
+        totalPunches,
+        acceptanceRate,
         recordableIncidents,
+        goodSaves,
         avgTrir,
       },
       domains,
@@ -1403,6 +1426,436 @@ router.put('/:tenantId/config/:dashboardKey', async (req, res) => {
   }
 });
 
+// ─── Metric Catalog (User's tier + allowed domains) ──────────────────────────
+
+/**
+ * GET /api/dashboards/:tenantId/metric-catalog
+ *
+ * Returns the user's metric tier, allowed domains, template name, and default hero metrics.
+ * Used by RBACContext on the frontend.
+ */
+router.get('/:tenantId/metric-catalog', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const template = await getUserTemplate(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+    res.json({
+      metricTier: template.metric_tier,
+      allowedDomains: template.allowed_domains,
+      templateName: template.name,
+      defaultHeroMetrics: template.default_hero_metrics,
+    });
+  } catch (err) {
+    console.error('[dashboards] Metric catalog error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch metric catalog' });
+  }
+});
+
+// ─── Role Templates CRUD ─────────────────────────────────────────────────────
+
+/**
+ * GET /api/dashboards/:tenantId/role-templates
+ * List all role templates for a tenant. Any authenticated user can read.
+ */
+router.get('/:tenantId/role-templates', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const { data, error } = await req.supabase
+      .from('dashboard_role_templates')
+      .select('*')
+      .eq('tenant_id', effectiveTenantId)
+      .order('created_at');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('[dashboards] Role templates list error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch role templates' });
+  }
+});
+
+/**
+ * POST /api/dashboards/:tenantId/role-templates
+ * Create a new role template. Admin only.
+ */
+router.post('/:tenantId/role-templates', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  const isPlatform = PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin && !isPlatform) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  if (!isPlatform && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { name, description, metric_tier, allowed_domains, default_hero_metrics, is_default } = req.body;
+
+  if (!name?.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+
+  const validTiers = ['operational', 'managerial', 'financial'];
+  if (metric_tier && !validTiers.includes(metric_tier)) {
+    return res.status(400).json({ error: `metric_tier must be one of: ${validTiers.join(', ')}` });
+  }
+
+  try {
+    // If is_default, clear existing defaults first
+    if (is_default) {
+      await req.supabase
+        .from('dashboard_role_templates')
+        .update({ is_default: false })
+        .eq('tenant_id', effectiveTenantId)
+        .eq('is_default', true);
+    }
+
+    const { data, error } = await req.supabase
+      .from('dashboard_role_templates')
+      .insert({
+        tenant_id: effectiveTenantId,
+        name: name.trim(),
+        description: description?.trim() || null,
+        metric_tier: metric_tier || 'operational',
+        allowed_domains: allowed_domains || ['operations', 'labor', 'quality', 'timekeeping', 'safety'],
+        default_hero_metrics: default_hero_metrics || null,
+        is_default: is_default || false,
+        created_by: req.user.id,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: `Template "${name}" already exists for this tenant` });
+    }
+    console.error('[dashboards] Role template create error:', err.message);
+    res.status(500).json({ error: 'Failed to create role template' });
+  }
+});
+
+/**
+ * PUT /api/dashboards/:tenantId/role-templates/:id
+ * Update an existing role template. Admin only.
+ */
+router.put('/:tenantId/role-templates/:id', async (req, res) => {
+  const { tenantId, id } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  const isPlatform = PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin && !isPlatform) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  if (!isPlatform && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { name, description, metric_tier, allowed_domains, default_hero_metrics, is_default } = req.body;
+  const updates = {};
+
+  if (name !== undefined) updates.name = name.trim();
+  if (description !== undefined) updates.description = description?.trim() || null;
+  if (metric_tier !== undefined) {
+    const validTiers = ['operational', 'managerial', 'financial'];
+    if (!validTiers.includes(metric_tier)) {
+      return res.status(400).json({ error: `metric_tier must be one of: ${validTiers.join(', ')}` });
+    }
+    updates.metric_tier = metric_tier;
+  }
+  if (allowed_domains !== undefined) updates.allowed_domains = allowed_domains;
+  if (default_hero_metrics !== undefined) updates.default_hero_metrics = default_hero_metrics;
+  if (is_default !== undefined) updates.is_default = is_default;
+
+  try {
+    // If setting as default, clear existing defaults first
+    if (is_default) {
+      await req.supabase
+        .from('dashboard_role_templates')
+        .update({ is_default: false })
+        .eq('tenant_id', effectiveTenantId)
+        .eq('is_default', true);
+    }
+
+    const { data, error } = await req.supabase
+      .from('dashboard_role_templates')
+      .update(updates)
+      .eq('id', id)
+      .eq('tenant_id', effectiveTenantId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Template not found' });
+    res.json(data);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: `Template name already exists for this tenant` });
+    }
+    console.error('[dashboards] Role template update error:', err.message);
+    res.status(500).json({ error: 'Failed to update role template' });
+  }
+});
+
+/**
+ * DELETE /api/dashboards/:tenantId/role-templates/:id
+ * Delete a role template. Admin only.
+ */
+router.delete('/:tenantId/role-templates/:id', async (req, res) => {
+  const { tenantId, id } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  const isPlatform = PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin && !isPlatform) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  if (!isPlatform && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const { error } = await req.supabase
+      .from('dashboard_role_templates')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', effectiveTenantId);
+
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[dashboards] Role template delete error:', err.message);
+    res.status(500).json({ error: 'Failed to delete role template' });
+  }
+});
+
+// ─── Site Assignments CRUD ───────────────────────────────────────────────────
+
+/**
+ * GET /api/dashboards/:tenantId/site-assignments
+ * Regular users: own assignments. Admins: all tenant assignments.
+ */
+router.get('/:tenantId/site-assignments', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const isAdmin = ['admin', 'super-admin'].includes(req.user?.role) || PLATFORM_ROLES.includes(req.user?.role);
+
+    let query = req.supabase
+      .from('user_site_assignments')
+      .select('id, user_id, job_id, assigned_by, created_at')
+      .eq('tenant_id', effectiveTenantId);
+
+    // Non-admins only see their own assignments
+    if (!isAdmin) {
+      query = query.eq('user_id', req.user.id);
+    }
+
+    const { data, error } = await query.order('created_at');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('[dashboards] Site assignments list error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch site assignments' });
+  }
+});
+
+/**
+ * GET /api/dashboards/:tenantId/site-assignments/:userId
+ * Admin only: get assignments for a specific user.
+ */
+router.get('/:tenantId/site-assignments/:userId', async (req, res) => {
+  const { tenantId, userId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role) || PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  try {
+    const { data, error } = await req.supabase
+      .from('user_site_assignments')
+      .select('id, user_id, job_id, assigned_by, created_at')
+      .eq('tenant_id', effectiveTenantId)
+      .eq('user_id', userId)
+      .order('created_at');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('[dashboards] User site assignments error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch user site assignments' });
+  }
+});
+
+/**
+ * PUT /api/dashboards/:tenantId/site-assignments/:userId
+ * Admin only: bulk-set assignments. Body: { jobIds: [...] }
+ * Deletes existing assignments and inserts new ones.
+ */
+router.put('/:tenantId/site-assignments/:userId', async (req, res) => {
+  const { tenantId, userId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role) || PLATFORM_ROLES.includes(req.user?.role);
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { jobIds } = req.body;
+  if (!Array.isArray(jobIds)) {
+    return res.status(400).json({ error: 'jobIds must be an array' });
+  }
+
+  try {
+    // Delete existing assignments
+    const { error: deleteError } = await req.supabase
+      .from('user_site_assignments')
+      .delete()
+      .eq('user_id', userId)
+      .eq('tenant_id', effectiveTenantId);
+
+    if (deleteError) throw deleteError;
+
+    // Insert new assignments (skip if empty — means "all sites")
+    if (jobIds.length > 0) {
+      const rows = jobIds.map(jobId => ({
+        user_id: userId,
+        tenant_id: effectiveTenantId,
+        job_id: jobId,
+        assigned_by: req.user.id,
+      }));
+
+      const { error: insertError } = await req.supabase
+        .from('user_site_assignments')
+        .insert(rows);
+
+      if (insertError) throw insertError;
+    }
+
+    res.json({ ok: true, count: jobIds.length });
+  } catch (err) {
+    console.error('[dashboards] Site assignments update error:', err.message);
+    res.status(500).json({ error: 'Failed to update site assignments' });
+  }
+});
+
+// ─── Operational Intelligence (Command Center Section 3) ────────────────────
+
+/**
+ * GET /api/dashboards/:tenantId/ops-intelligence
+ *
+ * Returns counts for the Command Center's Operational Intelligence section:
+ * active agents, deployed skills (SOPs), and completed automations.
+ */
+router.get('/:tenantId/ops-intelligence', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const key = cacheKey(effectiveTenantId, 'ops-intelligence', {});
+  const cached = getCached(key);
+  if (cached) return res.json(cached);
+
+  try {
+    // Fetch all counts in parallel
+    const [agentsRes, sopsRes, automationsRes] = await Promise.all([
+      req.supabase
+        .from('alf_agent_definitions')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'active'),
+      req.supabase
+        .from('sop_analyses')
+        .select('id, status')
+        .eq('tenant_id', effectiveTenantId),
+      req.supabase
+        .from('automation_actions')
+        .select('id, status')
+        .eq('tenant_id', effectiveTenantId),
+    ]);
+
+    // Total agents (platform-wide, all active)
+    const totalAgentsRes = await req.supabase
+      .from('alf_agent_definitions')
+      .select('id', { count: 'exact', head: true });
+
+    const activeAgents = agentsRes.count || 0;
+    const totalAgents = totalAgentsRes.count || 0;
+
+    const sops = sopsRes.data || [];
+    const deployedSkills = sops.filter(s => s.status === 'completed').length;
+    const totalSkills = sops.length;
+
+    const automations = automationsRes.data || [];
+    const automationsCompleted = automations.filter(a => a.status === 'completed').length;
+    const automationsTotal = automations.length;
+
+    const result = {
+      activeAgents,
+      totalAgents,
+      deployedSkills,
+      totalSkills,
+      automationsCompleted,
+      automationsTotal,
+    };
+
+    setCache(key, result);
+    res.json(result);
+  } catch (err) {
+    console.error('[dashboards] Ops intelligence error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch ops intelligence' });
+  }
+});
+
+// ─── Generic Domain Data (MUST be last — catches :tenantId/:domain) ──────────
+
 /**
  * GET /api/dashboards/:tenantId/:domain
  *
@@ -1428,13 +1881,19 @@ router.get('/:tenantId/:domain', async (req, res) => {
     return res.status(400).json({ error: `Invalid domain. Must be one of: ${validDomains.join(', ')}` });
   }
 
+  // Apply user site scoping
+  const requestedJobIds = req.query.jobIds ? req.query.jobIds.split(',') : null;
+  const scopedJobIds = await getUserScopedJobIds(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+  const effectiveJobIds = intersectJobIds(scopedJobIds, requestedJobIds);
+
   const filters = {
     dateFrom: req.query.dateFrom || null,
     dateTo: req.query.dateTo || null,
-    jobIds: req.query.jobIds ? req.query.jobIds.split(',') : null,
+    jobIds: effectiveJobIds,
   };
 
-  const key = cacheKey(effectiveTenantId, domain, filters);
+  const userId = scopedJobIds ? req.user.id : null;
+  const key = cacheKey(effectiveTenantId, domain, filters, userId);
   const cached = getCached(key);
   if (cached) {
     return res.json(cached);
