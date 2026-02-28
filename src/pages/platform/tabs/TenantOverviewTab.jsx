@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Save, Loader2, Users, MapPin, Activity, Zap,
-  Plus, Mail, UserX, UserCheck,
+  Plus, Mail, UserX, UserCheck, Settings2, X,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../../lib/supabase';
 import DataTable from '../../../components/shared/DataTable';
@@ -128,6 +128,15 @@ export default function TenantOverviewTab({
   const [roleUpdating, setRoleUpdating] = useState(null);
   const [localUsers, setLocalUsers] = useState(users);
 
+  // User config modal (template + site assignments)
+  const [configUser, setConfigUser] = useState(null);
+  const [configTemplates, setConfigTemplates] = useState([]);
+  const [configJobs, setConfigJobs] = useState([]);
+  const [configAssignedSites, setConfigAssignedSites] = useState([]);
+  const [configSelectedTemplate, setConfigSelectedTemplate] = useState('');
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
+
   useEffect(() => {
     setLocalUsers(users);
   }, [users]);
@@ -167,7 +176,7 @@ export default function TenantOverviewTab({
       } else {
         setNewUserForm({ name: '', email: '', password: '', role: 'user' });
         setShowAddUser(false);
-        const { data } = await supabase.from('profiles').select('id, name, email, role, active').eq('tenant_id', tenant.id).order('name');
+        const { data } = await supabase.from('profiles').select('id, name, email, role, active, dashboard_template_id').eq('tenant_id', tenant.id).order('name');
         setLocalUsers(data || []);
       }
     } catch (err) {
@@ -226,6 +235,75 @@ export default function TenantOverviewTab({
     setRoleUpdating(null);
   }
 
+  async function openConfigModal(user) {
+    setConfigUser(user);
+    setConfigLoading(true);
+    setConfigSelectedTemplate(user.dashboard_template_id || '');
+    setConfigAssignedSites([]);
+
+    const [templatesRes, jobsRes, assignmentsRes] = await Promise.all([
+      supabase.from('dashboard_role_templates').select('*').eq('tenant_id', tenant.id).order('name'),
+      supabase.from('sf_dim_job').select('id, job_name, location').eq('tenant_id', tenant.id).order('job_name'),
+      supabase.from('user_site_assignments').select('job_id').eq('user_id', user.id).eq('tenant_id', tenant.id),
+    ]);
+
+    setConfigTemplates(templatesRes.data || []);
+    setConfigJobs(jobsRes.data || []);
+    setConfigAssignedSites((assignmentsRes.data || []).map((a) => a.job_id));
+    setConfigLoading(false);
+  }
+
+  async function saveUserConfig() {
+    if (!configUser) return;
+    setConfigSaving(true);
+    setError(null);
+
+    // Update template
+    const { error: templateErr } = await supabase
+      .from('profiles')
+      .update({ dashboard_template_id: configSelectedTemplate || null })
+      .eq('id', configUser.id);
+
+    if (templateErr) {
+      setError(templateErr.message);
+      setConfigSaving(false);
+      return;
+    }
+
+    // Replace site assignments
+    await supabase.from('user_site_assignments').delete().eq('user_id', configUser.id).eq('tenant_id', tenant.id);
+
+    if (configAssignedSites.length > 0) {
+      const rows = configAssignedSites.map((jobId) => ({
+        user_id: configUser.id,
+        tenant_id: tenant.id,
+        job_id: jobId,
+      }));
+      const { error: insertErr } = await supabase.from('user_site_assignments').insert(rows);
+      if (insertErr) {
+        setError(insertErr.message);
+        setConfigSaving(false);
+        return;
+      }
+    }
+
+    // Update local user state
+    setLocalUsers((prev) =>
+      prev.map((u) =>
+        u.id === configUser.id ? { ...u, dashboard_template_id: configSelectedTemplate || null } : u
+      )
+    );
+
+    setConfigSaving(false);
+    setConfigUser(null);
+  }
+
+  function toggleSiteAssignment(jobId) {
+    setConfigAssignedSites((prev) =>
+      prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]
+    );
+  }
+
   const ROLE_OPTIONS = ['user', 'manager', 'admin', 'super-admin'];
 
   const ROLE_STYLES = {
@@ -276,6 +354,15 @@ export default function TenantOverviewTab({
       key: 'id', label: 'Actions',
       render: (_, row) => (
         <div className="flex items-center gap-2">
+          {row.role !== 'platform_owner' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); openConfigModal(row); }}
+              title="Configure template & site assignments"
+              className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+            >
+              <Settings2 size={14} />
+            </button>
+          )}
           <button
             onClick={(e) => { e.stopPropagation(); handleResetPassword(row.email); }}
             disabled={userActionLoading === row.email}
@@ -545,6 +632,127 @@ export default function TenantOverviewTab({
           </div>
         )}
       </div>
+
+      {/* User Config Modal */}
+      {configUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => !configSaving && setConfigUser(null)} />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-sm font-semibold text-dark-text">Configure User</h3>
+                <p className="text-xs text-secondary-text mt-0.5">{configUser.name} ({configUser.email})</p>
+              </div>
+              <button
+                onClick={() => !configSaving && setConfigUser(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+              {configLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={20} className="text-amber-500 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {/* Dashboard Template */}
+                  <div>
+                    <label className="block text-xs font-medium text-secondary-text uppercase tracking-wider mb-2">
+                      Dashboard Template
+                    </label>
+                    <select
+                      value={configSelectedTemplate}
+                      onChange={(e) => setConfigSelectedTemplate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="">No template (full access)</option>
+                      {configTemplates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} — {t.metric_tier}{t.is_default ? ' (default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {configTemplates.length === 0 && (
+                      <p className="text-xs text-secondary-text mt-1">
+                        No role templates defined. Create them in the Dashboards tab.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Site Assignments */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-medium text-secondary-text uppercase tracking-wider">
+                        Site Assignments
+                      </label>
+                      <span className="text-xs text-secondary-text">
+                        {configAssignedSites.length} of {configJobs.length} selected
+                      </span>
+                    </div>
+                    {configJobs.length === 0 ? (
+                      <p className="text-xs text-secondary-text">
+                        No sites/jobs in sf_dim_job for this tenant.
+                      </p>
+                    ) : (
+                      <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                        {configJobs.map((job) => {
+                          const checked = configAssignedSites.includes(job.id);
+                          return (
+                            <label
+                              key={job.id}
+                              className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${
+                                checked ? 'bg-amber-50 text-amber-800' : 'hover:bg-gray-50 text-gray-600'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleSiteAssignment(job.id)}
+                                className="accent-amber-600"
+                              />
+                              <span className="font-medium">{job.job_name}</span>
+                              {job.location && (
+                                <span className="text-secondary-text ml-auto truncate max-w-[140px]">{job.location}</span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <p className="text-xs text-secondary-text mt-1.5">
+                      Leave empty for access to all sites.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-200">
+              <button
+                onClick={() => setConfigUser(null)}
+                disabled={configSaving}
+                className="px-3 py-1.5 text-sm text-secondary-text hover:text-dark-text transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveUserConfig}
+                disabled={configSaving || configLoading}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+              >
+                {configSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

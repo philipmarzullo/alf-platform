@@ -6,7 +6,7 @@ import {
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
   Plus, Mail, Palette, RefreshCw, ChevronRight, BarChart3,
-  GripVertical, Download, HardDrive, AlertTriangle, Wrench,
+  GripVertical, Download, HardDrive, AlertTriangle, Wrench, Settings2, Star, X,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
@@ -92,7 +92,7 @@ export default function PlatformTenantDetailPage() {
 
     const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes, dashActionsRes] = await Promise.all([
       supabase.from('alf_tenants').select('*').eq('id', id).single(),
-      supabase.from('profiles').select('id, name, email, role, active').eq('tenant_id', id).order('name'),
+      supabase.from('profiles').select('id, name, email, role, active, dashboard_template_id').eq('tenant_id', id).order('name'),
       supabase.from('tenant_sites').select('*').eq('tenant_id', id).order('name'),
       supabase.from('alf_usage_logs').select('id, agent_key, tokens_input, tokens_output, created_at').eq('tenant_id', id).order('created_at', { ascending: false }).limit(100),
       supabase.from('tenant_agent_overrides').select('*').eq('tenant_id', id),
@@ -2738,10 +2738,23 @@ function DashboardsTab({ tenantId }) {
   const [acceptedRecs, setAcceptedRecs] = useState(new Set());
   const [applyingRecs, setApplyingRecs] = useState(false);
 
+  // Role Templates state
+  const [roleTemplates, setRoleTemplates] = useState([]);
+  const [rtLoading, setRtLoading] = useState(true);
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
+  const [rtSaving, setRtSaving] = useState(false);
+  const [rtDeleting, setRtDeleting] = useState(null);
+  const [rtConfirmDelete, setRtConfirmDelete] = useState(null);
+  const [rtForm, setRtForm] = useState({
+    name: '', description: '', metric_tier: 'operational', allowed_domains: [], is_default: false,
+  });
+
   const backendUrl = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
 
   useEffect(() => {
     loadConfigs();
+    loadRoleTemplates();
   }, [tenantId]);
 
   async function loadConfigs() {
@@ -2759,6 +2772,120 @@ function DashboardsTab({ tenantId }) {
       setLoading(false);
     }
   }
+
+  async function loadRoleTemplates() {
+    setRtLoading(true);
+    const { data, error } = await supabase
+      .from('dashboard_role_templates')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at');
+    if (!error) setRoleTemplates(data || []);
+    setRtLoading(false);
+  }
+
+  function resetRtForm() {
+    setRtForm({ name: '', description: '', metric_tier: 'operational', allowed_domains: [], is_default: false });
+    setEditingTemplate(null);
+    setShowTemplateForm(false);
+  }
+
+  function startEditTemplate(template) {
+    setEditingTemplate(template);
+    setRtForm({
+      name: template.name,
+      description: template.description || '',
+      metric_tier: template.metric_tier || 'operational',
+      allowed_domains: template.allowed_domains || [],
+      is_default: template.is_default || false,
+    });
+    setShowTemplateForm(true);
+  }
+
+  async function handleSaveTemplate() {
+    if (!rtForm.name.trim()) return;
+    setRtSaving(true);
+    setMessage(null);
+
+    // If setting as default, clear others first
+    if (rtForm.is_default) {
+      const excludeId = editingTemplate?.id;
+      const q = supabase.from('dashboard_role_templates').update({ is_default: false }).eq('tenant_id', tenantId);
+      if (excludeId) q.neq('id', excludeId);
+      await q;
+    }
+
+    if (editingTemplate) {
+      const { error } = await supabase
+        .from('dashboard_role_templates')
+        .update({
+          name: rtForm.name.trim(),
+          description: rtForm.description.trim() || null,
+          metric_tier: rtForm.metric_tier,
+          allowed_domains: rtForm.allowed_domains,
+          is_default: rtForm.is_default,
+        })
+        .eq('id', editingTemplate.id);
+      if (error) {
+        setMessage({ type: 'error', text: error.message });
+      } else {
+        setMessage({ type: 'success', text: 'Template updated' });
+        setTimeout(() => setMessage(null), 2000);
+      }
+    } else {
+      const { error } = await supabase
+        .from('dashboard_role_templates')
+        .insert({
+          tenant_id: tenantId,
+          name: rtForm.name.trim(),
+          description: rtForm.description.trim() || null,
+          metric_tier: rtForm.metric_tier,
+          allowed_domains: rtForm.allowed_domains,
+          is_default: rtForm.is_default,
+        });
+      if (error) {
+        setMessage({ type: 'error', text: error.message });
+      } else {
+        setMessage({ type: 'success', text: 'Template created' });
+        setTimeout(() => setMessage(null), 2000);
+      }
+    }
+
+    setRtSaving(false);
+    resetRtForm();
+    loadRoleTemplates();
+  }
+
+  async function handleDeleteTemplate(templateId) {
+    setRtDeleting(templateId);
+    const { error } = await supabase.from('dashboard_role_templates').delete().eq('id', templateId);
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+    } else {
+      setRoleTemplates((prev) => prev.filter((t) => t.id !== templateId));
+      setMessage({ type: 'success', text: 'Template deleted' });
+      setTimeout(() => setMessage(null), 2000);
+    }
+    setRtDeleting(null);
+    setRtConfirmDelete(null);
+  }
+
+  function toggleRtDomain(domain) {
+    setRtForm((prev) => ({
+      ...prev,
+      allowed_domains: prev.allowed_domains.includes(domain)
+        ? prev.allowed_domains.filter((d) => d !== domain)
+        : [...prev.allowed_domains, domain],
+    }));
+  }
+
+  const RT_DOMAINS = ['operations', 'labor', 'quality', 'timekeeping', 'safety'];
+  const RT_TIERS = ['operational', 'managerial', 'financial'];
+  const TIER_BADGE = {
+    operational: 'bg-green-50 text-green-700',
+    managerial: 'bg-blue-50 text-blue-700',
+    financial: 'bg-purple-50 text-purple-700',
+  };
 
   async function handleApplyTemplate() {
     if (!selectedTemplate) return;
@@ -2919,6 +3046,221 @@ function DashboardsTab({ tenantId }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Role Templates Section ── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-lg font-semibold text-dark-text">Role Templates</h2>
+            <p className="text-sm text-secondary-text mt-1">
+              Control which metrics and domains each role tier can access. Assign templates to users on the Overview tab.
+            </p>
+          </div>
+          {!showTemplateForm && (
+            <button
+              onClick={() => { resetRtForm(); setShowTemplateForm(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+            >
+              <Plus size={14} />
+              Add Template
+            </button>
+          )}
+        </div>
+
+        {/* Inline form */}
+        {showTemplateForm && (
+          <div className="bg-white rounded-lg border border-amber-200 p-4 mb-4 space-y-4">
+            <h3 className="text-sm font-semibold text-dark-text">
+              {editingTemplate ? 'Edit Template' : 'New Template'}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-secondary-text mb-1">Name</label>
+                <input
+                  type="text"
+                  value={rtForm.name}
+                  onChange={(e) => setRtForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Site Manager"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-secondary-text mb-1">Description</label>
+                <input
+                  type="text"
+                  value={rtForm.description}
+                  onChange={(e) => setRtForm((prev) => ({ ...prev, description: e.target.value }))}
+                  placeholder="Optional description"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* Metric Tier */}
+            <div>
+              <label className="block text-xs font-medium text-secondary-text mb-2">Metric Tier</label>
+              <div className="flex gap-3">
+                {RT_TIERS.map((tier) => (
+                  <label
+                    key={tier}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border transition-colors ${
+                      rtForm.metric_tier === tier
+                        ? 'border-amber-300 bg-amber-50 text-amber-800'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="metric_tier"
+                      value={tier}
+                      checked={rtForm.metric_tier === tier}
+                      onChange={(e) => setRtForm((prev) => ({ ...prev, metric_tier: e.target.value }))}
+                      className="accent-amber-600"
+                    />
+                    <span className="capitalize">{tier}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Allowed Domains */}
+            <div>
+              <label className="block text-xs font-medium text-secondary-text mb-2">Allowed Domains</label>
+              <div className="flex flex-wrap gap-2">
+                {RT_DOMAINS.map((domain) => {
+                  const checked = rtForm.allowed_domains.includes(domain);
+                  return (
+                    <label
+                      key={domain}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border transition-colors ${
+                        checked
+                          ? 'border-amber-300 bg-amber-50 text-amber-800'
+                          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleRtDomain(domain)}
+                        className="accent-amber-600"
+                      />
+                      <span className="capitalize">{domain}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Is Default */}
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rtForm.is_default}
+                onChange={(e) => setRtForm((prev) => ({ ...prev, is_default: e.target.checked }))}
+                className="accent-amber-600"
+              />
+              Set as default template for new users
+            </label>
+
+            {/* Form actions */}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleSaveTemplate}
+                disabled={rtSaving || !rtForm.name.trim()}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+              >
+                {rtSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                {editingTemplate ? 'Update' : 'Create'}
+              </button>
+              <button
+                onClick={resetRtForm}
+                className="px-3 py-1.5 text-sm text-secondary-text hover:text-dark-text transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Template cards */}
+        {rtLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 size={18} className="text-amber-500 animate-spin" />
+          </div>
+        ) : roleTemplates.length === 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-sm text-secondary-text">
+            No role templates defined yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {roleTemplates.map((tmpl) => (
+              <div key={tmpl.id} className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-dark-text">{tmpl.name}</span>
+                    {tmpl.is_default && (
+                      <Star size={14} className="text-amber-500 fill-amber-500" />
+                    )}
+                  </div>
+                  <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full capitalize ${TIER_BADGE[tmpl.metric_tier] || 'bg-gray-100 text-gray-600'}`}>
+                    {tmpl.metric_tier}
+                  </span>
+                </div>
+                {tmpl.description && (
+                  <p className="text-xs text-secondary-text mb-2">{tmpl.description}</p>
+                )}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {(tmpl.allowed_domains || []).map((d) => (
+                    <span key={d} className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 capitalize">
+                      {d}
+                    </span>
+                  ))}
+                  {(!tmpl.allowed_domains || tmpl.allowed_domains.length === 0) && (
+                    <span className="text-[10px] text-secondary-text">No domain restrictions</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                  <button
+                    onClick={() => startEditTemplate(tmpl)}
+                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                  >
+                    Edit
+                  </button>
+                  {rtConfirmDelete === tmpl.id ? (
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      <span className="text-xs text-red-600">Delete?</span>
+                      <button
+                        onClick={() => handleDeleteTemplate(tmpl.id)}
+                        disabled={rtDeleting === tmpl.id}
+                        className="px-2 py-0.5 text-xs font-medium text-red-600 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
+                      >
+                        {rtDeleting === tmpl.id ? <Loader2 size={10} className="animate-spin" /> : 'Yes'}
+                      </button>
+                      <button
+                        onClick={() => setRtConfirmDelete(null)}
+                        className="px-2 py-0.5 text-xs text-secondary-text hover:text-dark-text transition-colors"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setRtConfirmDelete(tmpl.id)}
+                      className="text-xs text-secondary-text hover:text-red-600 font-medium transition-colors ml-auto"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="border-t border-gray-200" />
+
+      {/* ── Dashboard Configuration ── */}
       <div>
         <h2 className="text-lg font-semibold text-dark-text">Dashboard Configuration</h2>
         <p className="text-sm text-secondary-text mt-1">
