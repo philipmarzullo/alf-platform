@@ -36,6 +36,7 @@ const EXPORT_TABLES = [
   { key: 'qbuIntakeData',         table: 'qbu_intake_data' },
   { key: 'qbuPhotos',             table: 'qbu_photos' },
   { key: 'qbuTestimonials',       table: 'qbu_testimonials' },
+  { key: 'customTools',           table: 'tenant_custom_tools' },
 ];
 
 const PLATFORM_TABLES = [

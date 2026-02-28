@@ -6,7 +6,7 @@ import {
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
   Plus, Mail, UserX, UserCheck, Palette, RefreshCw, ChevronRight, BarChart3,
-  GripVertical, Download, HardDrive, AlertTriangle,
+  GripVertical, Download, HardDrive, AlertTriangle, Wrench,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
@@ -38,6 +38,7 @@ const TABS = [
   { key: 'automation', label: 'Automation', icon: FlaskConical },
   { key: 'dashboards', label: 'Dashboards', icon: BarChart3 },
   { key: 'backup', label: 'Backup', icon: HardDrive },
+  { key: 'custom-tools', label: 'Custom Tools', icon: Wrench },
 ];
 
 // Which agents each module unlocks
@@ -777,6 +778,10 @@ export default function PlatformTenantDetailPage() {
 
       {activeTab === 'backup' && (
         <BackupTab tenantId={id} tenantSlug={tenant?.slug || tenant?.name} />
+      )}
+
+      {activeTab === 'custom-tools' && (
+        <CustomToolsTab tenantId={id} />
       )}
     </div>
   );
@@ -3468,6 +3473,7 @@ const BACKUP_CATEGORIES = [
   { key: 'qbuIntakeData', label: 'QBU Intake Data', icon: FileText },
   { key: 'qbuPhotos', label: 'QBU Photos', icon: FileText },
   { key: 'qbuTestimonials', label: 'QBU Testimonials', icon: FileText },
+  { key: 'customTools', label: 'Custom Tools', icon: Wrench },
 ];
 
 const BACKEND_URL_BACKUP = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
@@ -3728,6 +3734,119 @@ function BackupTab({ tenantId, tenantSlug }) {
           </ul>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─── Custom Tools Tab ─── */
+
+function CustomToolsTab({ tenantId }) {
+  const [tools, setTools] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [togglingId, setTogglingId] = useState(null);
+
+  useEffect(() => {
+    loadTools();
+  }, [tenantId]);
+
+  async function loadTools() {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('tenant_custom_tools')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at');
+
+    if (!error) setTools(data || []);
+    setLoading(false);
+  }
+
+  async function handleToggleActive(tool) {
+    setTogglingId(tool.id);
+    const { error } = await supabase
+      .from('tenant_custom_tools')
+      .update({ is_active: !tool.is_active, updated_at: new Date().toISOString() })
+      .eq('id', tool.id);
+
+    if (!error) {
+      setTools(prev => prev.map(t => t.id === tool.id ? { ...t, is_active: !t.is_active } : t));
+    }
+    setTogglingId(null);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 size={20} className="text-amber-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-medium text-dark-text">Custom Tools</h3>
+          <p className="text-sm text-secondary-text">Tools created by tenant admins via the Tool Builder.</p>
+        </div>
+        <span className="text-xs text-secondary-text">{tools.length} tool{tools.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {tools.length === 0 ? (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+          <Wrench size={24} className="text-gray-300 mx-auto mb-2" />
+          <p className="text-sm text-secondary-text">No custom tools created yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {tools.map(tool => (
+            <div key={tool.id} className={`bg-white rounded-lg border border-gray-200 p-4 ${!tool.is_active ? 'opacity-60' : ''}`}>
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                    <Wrench size={14} className="text-amber-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-medium text-dark-text">{tool.label}</h4>
+                      <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${tool.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {tool.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    {tool.description && (
+                      <p className="text-xs text-secondary-text mt-0.5">{tool.description}</p>
+                    )}
+                    <div className="flex items-center gap-3 mt-2 text-xs text-secondary-text">
+                      <span>{(tool.intake_schema || []).length} fields</span>
+                      <span className="text-gray-300">|</span>
+                      <span>Output: {tool.output_format}</span>
+                      <span className="text-gray-300">|</span>
+                      <span>Key: <code className="font-mono text-[11px]">{tool.tool_key}</code></span>
+                    </div>
+                    {tool.purpose && (
+                      <p className="text-xs text-secondary-text mt-2 italic">Purpose: {tool.purpose}</p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleToggleActive(tool)}
+                  disabled={togglingId === tool.id}
+                  className="shrink-0"
+                  title={tool.is_active ? 'Deactivate tool' : 'Activate tool'}
+                >
+                  {togglingId === tool.id ? (
+                    <Loader2 size={18} className="animate-spin text-gray-400" />
+                  ) : tool.is_active ? (
+                    <ToggleRight size={22} className="text-green-500" />
+                  ) : (
+                    <ToggleLeft size={22} className="text-gray-400" />
+                  )}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
