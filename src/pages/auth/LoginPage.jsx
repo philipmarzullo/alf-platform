@@ -21,9 +21,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-alf-dark flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <AlfMark size={64} className="mb-3" />
-          <h1 className="text-xl text-white" style={{ fontFamily: 'Georgia, serif', letterSpacing: -1 }}>alf</h1>
-          <p className="text-[10px] text-white/40 mt-1.5 tracking-[4px] uppercase" style={{ fontFamily: "'Helvetica Neue', sans-serif", fontWeight: 300 }}>Operations Intelligence</p>
+          <AlfMark variant="dark" size="lg" showTagline />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

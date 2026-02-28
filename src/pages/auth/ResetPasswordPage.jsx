@@ -37,9 +37,8 @@ export default function ResetPasswordPage() {
     <div className="min-h-screen bg-alf-dark flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <AlfMark size={64} className="mb-3" />
-          <h1 className="text-xl text-white" style={{ fontFamily: 'Georgia, serif', letterSpacing: -1 }}>alf</h1>
-          <p className="text-xs text-white/50 mt-1">Set New Password</p>
+          <AlfMark variant="dark" size="lg" className="mb-3" />
+          <p className="text-xs text-white/50">Set New Password</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

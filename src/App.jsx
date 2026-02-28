@@ -64,7 +64,7 @@ function ProtectedRoute({ children }) {
   if (!isPlatformOwner) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-light-bg text-center px-4">
-        <AlfMark size={56} className="mb-4" />
+        <AlfMark variant="light" size="md" className="mb-4" />
         <h2 className="text-xl font-semibold text-dark-text mb-2">Access Denied</h2>
         <p className="text-sm text-secondary-text max-w-md mb-6">
           This portal is restricted to platform owners. If you believe this is an error, contact the platform administrator.

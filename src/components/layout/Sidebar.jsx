@@ -35,9 +35,8 @@ export default function Sidebar() {
       isDesktop ? 'w-56' : 'w-64'
     }`}>
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 h-14 border-b border-white/10 shrink-0">
-        <AlfMark size={28} />
-        <span className="text-lg text-white" style={{ fontFamily: 'Georgia, serif', letterSpacing: -1 }}>alf</span>
+      <div className="flex items-center gap-3 px-4 h-14 border-b border-white/10 shrink-0">
+        <AlfMark variant="dark" size="sm" />
         {!isDesktop && (
           <button onClick={() => setMobileOpen(false)} className="ml-auto text-white/60 hover:text-white">
             <X size={20} />
