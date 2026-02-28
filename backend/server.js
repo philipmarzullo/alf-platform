@@ -7,7 +7,7 @@ import credentialsRouter from './routes/credentials.js';
 import platformCredentialsRouter from './routes/platformCredentials.js';
 import sopAnalysisRouter from './routes/sopAnalysis.js';
 import dashboardsRouter from './routes/dashboards.js';
-import backupRouter from './routes/backup.js';
+import backupRouter, { handleScheduledExport } from './routes/backup.js';
 import customToolsRouter from './routes/customTools.js';
 import syncRouter from './routes/sync.js';
 import oauthRouter from './routes/oauth.js';
@@ -49,6 +49,9 @@ app.get('/health', (req, res) => {
 
 // --- OAuth routes (no global auth — handled per-endpoint inside router) ---
 app.use('/api/oauth', oauthRouter);
+
+// --- Scheduled backup cron (no auth — protected by CRON_SECRET) ---
+app.post('/api/backup/cron/daily-export', handleScheduledExport);
 
 // --- Authenticated routes ---
 app.use('/api/claude', auth, claudeRouter);

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createClient } from '@supabase/supabase-js';
 
 const router = Router();
 
@@ -244,99 +245,135 @@ router.delete('/history/:backupId', async (req, res) => {
 });
 
 /**
+ * Core platform export logic — shared by manual export and scheduled cron.
+ * Returns { record, downloadUrl, fileSize, fileSizeFormatted, totalRows, tenantCount }.
+ */
+async function runPlatformExport(sb, { userId = null, userName = null } = {}) {
+  // 1. Fetch all tenants
+  const { data: tenants, error: tenantErr } = await sb
+    .from('alf_tenants')
+    .select('*');
+
+  if (tenantErr) throw tenantErr;
+
+  // 2. Build per-tenant payloads
+  const tenantExports = {};
+  let totalRows = 0;
+  const tenantSummaries = {};
+
+  for (const tenant of (tenants || [])) {
+    try {
+      const result = await buildTenantPayload(sb, tenant.id);
+      tenantExports[tenant.slug || tenant.id] = result.payload;
+      tenantSummaries[tenant.slug || tenant.id] = result.summary;
+      totalRows += result.totalRows;
+    } catch (err) {
+      console.warn(`[backup] Skipping tenant ${tenant.name}: ${err.message}`);
+      tenantExports[tenant.slug || tenant.id] = { error: err.message };
+    }
+  }
+
+  // 3. Fetch platform tables
+  const platformData = {};
+  const platformSummary = {};
+
+  for (const { key, table } of PLATFORM_TABLES) {
+    try {
+      const rows = await fetchAllRows(() => sb.from(table).select('*'));
+      platformData[key] = rows;
+      platformSummary[key] = rows.length;
+      totalRows += rows.length;
+    } catch (err) {
+      console.warn(`[backup] Skipping platform table ${table}: ${err.message}`);
+      platformData[key] = [];
+      platformSummary[key] = `skipped: ${err.message}`;
+    }
+  }
+
+  // 4. Assemble payload
+  const now = new Date();
+  const payload = {
+    exportedAt: now.toISOString(),
+    backupType: 'platform',
+    tenantCount: (tenants || []).length,
+    tenants: tenantExports,
+    platform: platformData,
+    _summary: {
+      tenants: tenantSummaries,
+      platform: platformSummary,
+      totalRows,
+    },
+  };
+
+  // 5. Save to storage
+  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const storagePath = `platform/full_backup_${dateStr}.json`;
+  const fileSize = await saveToStorage(sb, payload, storagePath);
+
+  // 6. Record in alf_backups
+  const tableSummary = { tenants: tenantSummaries, platform: platformSummary };
+  const record = await recordBackup(sb, {
+    backupType: 'platform',
+    tenantId: null,
+    userId,
+    userName: userName || 'scheduled',
+    storagePath,
+    fileSize,
+    rowCount: totalRows,
+    tableSummary,
+  });
+
+  // 7. Get download URL
+  const downloadUrl = await getSignedUrl(sb, storagePath);
+
+  return {
+    record,
+    downloadUrl,
+    fileSize,
+    fileSizeFormatted: formatBytes(fileSize),
+    totalRows,
+    tenantCount: (tenants || []).length,
+  };
+}
+
+/**
+ * Delete exports older than `days` days. Returns count deleted.
+ */
+async function purgeOldExports(sb, days = 30) {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: old, error: fetchErr } = await sb
+    .from('alf_backups')
+    .select('id, storage_path')
+    .lt('created_at', cutoff);
+
+  if (fetchErr || !old || old.length === 0) return 0;
+
+  // Delete storage files
+  const paths = old.map((b) => b.storage_path).filter(Boolean);
+  if (paths.length > 0) {
+    await sb.storage.from(STORAGE_BUCKET).remove(paths);
+  }
+
+  // Delete records
+  const ids = old.map((b) => b.id);
+  await sb.from('alf_backups').delete().in('id', ids);
+
+  return old.length;
+}
+
+/**
  * POST /platform/export
  * Full platform backup — all tenants + platform config tables.
  */
 router.post('/platform/export', async (req, res) => {
-  const sb = req.supabase;
-
   try {
-    // 1. Fetch all tenants
-    const { data: tenants, error: tenantErr } = await sb
-      .from('alf_tenants')
-      .select('*');
-
-    if (tenantErr) throw tenantErr;
-
-    // 2. Build per-tenant payloads
-    const tenantExports = {};
-    let totalRows = 0;
-    const tenantSummaries = {};
-
-    for (const tenant of (tenants || [])) {
-      try {
-        const result = await buildTenantPayload(sb, tenant.id);
-        tenantExports[tenant.slug || tenant.id] = result.payload;
-        tenantSummaries[tenant.slug || tenant.id] = result.summary;
-        totalRows += result.totalRows;
-      } catch (err) {
-        console.warn(`[backup] Skipping tenant ${tenant.name}: ${err.message}`);
-        tenantExports[tenant.slug || tenant.id] = { error: err.message };
-      }
-    }
-
-    // 3. Fetch platform tables
-    const platformData = {};
-    const platformSummary = {};
-
-    for (const { key, table } of PLATFORM_TABLES) {
-      try {
-        const rows = await fetchAllRows(() => sb.from(table).select('*'));
-        platformData[key] = rows;
-        platformSummary[key] = rows.length;
-        totalRows += rows.length;
-      } catch (err) {
-        console.warn(`[backup] Skipping platform table ${table}: ${err.message}`);
-        platformData[key] = [];
-        platformSummary[key] = `skipped: ${err.message}`;
-      }
-    }
-
-    // 4. Assemble mega-payload
-    const now = new Date();
-    const payload = {
-      exportedAt: now.toISOString(),
-      backupType: 'platform',
-      tenantCount: (tenants || []).length,
-      tenants: tenantExports,
-      platform: platformData,
-      _summary: {
-        tenants: tenantSummaries,
-        platform: platformSummary,
-        totalRows,
-      },
-    };
-
-    // 5. Save to storage
-    const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const storagePath = `platform/full_backup_${dateStr}.json`;
-    const fileSize = await saveToStorage(sb, payload, storagePath);
-
-    // 6. Record in alf_backups
-    const tableSummary = { tenants: tenantSummaries, platform: platformSummary };
-    const record = await recordBackup(sb, {
-      backupType: 'platform',
-      tenantId: null,
+    const result = await runPlatformExport(req.supabase, {
       userId: req.user?.id,
       userName: req.user?.name || req.user?.email,
-      storagePath,
-      fileSize,
-      rowCount: totalRows,
-      tableSummary,
     });
 
-    // 7. Get download URL
-    const downloadUrl = await getSignedUrl(sb, storagePath);
-
-    res.json({
-      success: true,
-      backup: record,
-      downloadUrl,
-      fileSize,
-      fileSizeFormatted: formatBytes(fileSize),
-      totalRows,
-      tenantCount: (tenants || []).length,
-    });
+    res.json({ success: true, backup: result.record, ...result });
   } catch (err) {
     console.error('[backup] Platform export failed:', err.message);
     res.status(500).json({ error: 'Platform export failed', detail: err.message });
@@ -440,5 +477,35 @@ router.post('/:tenantId/export', async (req, res) => {
     res.status(500).json({ error: 'Save backup failed', detail: err.message });
   }
 });
+
+// ──────────────────────────────────────────────
+// Scheduled export — called by Render Cron Job
+// ──────────────────────────────────────────────
+// Mounted separately in server.js (outside auth middleware)
+// Protected by CRON_SECRET bearer token
+export async function handleScheduledExport(req, res) {
+  const secret = process.env.CRON_SECRET;
+  const auth = req.headers.authorization;
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+
+  try {
+    console.log('[backup-cron] Starting scheduled platform export...');
+    const result = await runPlatformExport(sb, { userName: 'scheduled' });
+    console.log(`[backup-cron] Export complete: ${result.fileSizeFormatted}, ${result.totalRows} rows`);
+
+    // Purge exports older than 30 days
+    const purged = await purgeOldExports(sb, 30);
+    if (purged > 0) console.log(`[backup-cron] Purged ${purged} exports older than 30 days`);
+
+    res.json({ success: true, ...result, purged });
+  } catch (err) {
+    console.error('[backup-cron] Scheduled export failed:', err.message);
+    res.status(500).json({ error: 'Scheduled export failed', detail: err.message });
+  }
+}
 
 export default router;

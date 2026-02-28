@@ -3,9 +3,12 @@ import { getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
 import {
   HardDrive, Download, Trash2, Loader2, AlertTriangle, CheckCircle,
+  Shield, ExternalLink, FileJson,
 } from 'lucide-react';
 
 const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+const SUPABASE_PROJECT_REF = 'eyizhrubtpsfrstheamb';
+const SUPABASE_DASHBOARD_URL = `https://supabase.com/dashboard/project/${SUPABASE_PROJECT_REF}/database/backups/scheduled`;
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -42,7 +45,7 @@ export default function PlatformBackupsPage() {
     }
   }
 
-  async function handlePlatformExport() {
+  async function handleExport() {
     setExporting(true);
     setExportResult(null);
     setExportError(null);
@@ -54,13 +57,13 @@ export default function PlatformBackupsPage() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Platform export failed');
+        throw new Error(err.error || 'Export failed');
       }
       const data = await res.json();
       setExportResult(data);
       loadHistory();
     } catch (err) {
-      console.error('[backups] Platform export error:', err);
+      console.error('[backups] Export error:', err);
       setExportError(err.message);
     } finally {
       setExporting(false);
@@ -108,18 +111,13 @@ export default function PlatformBackupsPage() {
       ),
     },
     {
-      key: 'tenant',
-      label: 'Tenant',
-      render: (_, row) => (
+      key: 'triggered_by_name',
+      label: 'Source',
+      render: (v) => (
         <span className="text-xs text-secondary-text">
-          {row.tenant?.name || (row.backup_type === 'platform' ? 'All tenants' : '—')}
+          {v === 'scheduled' ? 'Daily auto-export' : v || '—'}
         </span>
       ),
-    },
-    {
-      key: 'triggered_by_name',
-      label: 'Triggered By',
-      render: (v) => <span className="text-xs text-secondary-text">{v || '—'}</span>,
     },
     {
       key: 'file_size_bytes',
@@ -165,29 +163,72 @@ export default function PlatformBackupsPage() {
       <div>
         <h1 className="text-xl font-semibold text-dark-text flex items-center gap-2">
           <HardDrive size={22} />
-          Backups
+          Backups & Exports
         </h1>
         <p className="text-sm text-secondary-text mt-1">
-          Platform-wide and per-tenant backup management
+          Infrastructure backups and application data exports
         </p>
       </div>
 
-      {/* Platform Backup Action */}
+      {/* ── Section 1: Infrastructure Backups ── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-green-50 rounded-lg shrink-0">
+            <Shield size={20} className="text-green-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-base font-semibold text-dark-text">Infrastructure Backups</h3>
+            <p className="text-sm text-secondary-text mt-1">
+              Managed by Supabase Pro Plan
+            </p>
+            <div className="mt-3 space-y-2 text-sm text-dark-text">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={14} className="text-green-500 shrink-0" />
+                Automatic daily backups — runs every 24 hours
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle size={14} className="text-green-500 shrink-0" />
+                Point-in-time recovery available for the last 7 days
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle size={14} className="text-green-500 shrink-0" />
+                Full database restore available through Supabase dashboard
+              </div>
+            </div>
+            <p className="text-xs text-secondary-text mt-3">
+              No action required — database backups are fully automated. For restore operations:
+            </p>
+            <a
+              href={SUPABASE_DASHBOARD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 mt-2 text-sm text-alf-orange hover:text-alf-orange/80 font-medium transition-colors"
+            >
+              Open Supabase Dashboard <ExternalLink size={13} />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section 2: Application Exports ── */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-dark-text">Full Platform Backup</h3>
-            <p className="text-sm text-secondary-text mt-1 max-w-xl">
-              Export all tenant data and platform configuration tables into a single JSON file, saved to cloud storage with a download link.
-            </p>
-            <p className="text-xs text-secondary-text mt-2">
-              Includes: all tenants' profiles, sites, documents, tool submissions, agent overrides, SOP analyses, automation data, dashboard configs, QBU data — plus platform tables (tenants, agent definitions, platform config, usage logs).
-            </p>
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-alf-orange/10 rounded-lg shrink-0">
+              <FileJson size={20} className="text-alf-orange" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-dark-text">Application Exports</h3>
+              <p className="text-sm text-secondary-text mt-1 max-w-xl">
+                Export tenant configurations, agent definitions, and application-level data as JSON.
+                Useful for migration, auditing, or external archival. A daily auto-export runs and retains 30 days of history.
+              </p>
+            </div>
           </div>
           <button
-            onClick={handlePlatformExport}
+            onClick={handleExport}
             disabled={exporting}
-            className="flex items-center gap-2 px-5 py-2.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+            className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
           >
             {exporting ? (
               <>
@@ -196,8 +237,8 @@ export default function PlatformBackupsPage() {
               </>
             ) : (
               <>
-                <HardDrive size={16} />
-                Full Platform Backup
+                <FileJson size={16} />
+                Export Platform Data
               </>
             )}
           </button>
@@ -208,7 +249,7 @@ export default function PlatformBackupsPage() {
           <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
             <CheckCircle size={18} className="text-green-600 shrink-0 mt-0.5" />
             <div className="text-sm text-green-800">
-              <p className="font-medium">Platform backup saved successfully</p>
+              <p className="font-medium">Export saved successfully</p>
               <p className="mt-1">
                 {exportResult.fileSizeFormatted} — {exportResult.totalRows.toLocaleString()} rows across {exportResult.tenantCount} tenant{exportResult.tenantCount !== 1 ? 's' : ''}
               </p>
@@ -218,7 +259,7 @@ export default function PlatformBackupsPage() {
                   download
                   className="inline-flex items-center gap-1 mt-2 text-green-700 hover:text-green-900 font-medium"
                 >
-                  <Download size={14} /> Download backup
+                  <Download size={14} /> Download export
                 </a>
               )}
             </div>
@@ -236,21 +277,22 @@ export default function PlatformBackupsPage() {
         <div className="mt-4 bg-alf-orange/10 border border-alf-orange/30 rounded-lg p-4 flex gap-3">
           <AlertTriangle size={16} className="text-alf-orange shrink-0 mt-0.5" />
           <div className="text-xs text-alf-orange">
-            <span className="font-medium">Excluded:</span> API credentials (encrypted keys), Snowflake sync tables (sf_*), generated PPTX decks
+            <span className="font-medium">Not included:</span> API credentials (encrypted keys), Snowflake sync tables (sf_*), generated PPTX decks.
+            These are not application config — use Supabase backups for full database recovery.
           </div>
         </div>
       </div>
 
-      {/* Backup History */}
+      {/* ── Export History ── */}
       <div>
-        <h3 className="text-sm font-semibold text-dark-text mb-3">Backup History</h3>
+        <h3 className="text-sm font-semibold text-dark-text mb-3">Export History</h3>
         {loadingHistory ? (
           <div className="flex items-center gap-2 text-secondary-text text-sm py-8 justify-center">
             <Loader2 size={16} className="animate-spin" /> Loading history...
           </div>
         ) : history.length === 0 ? (
           <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-sm text-secondary-text">
-            No backups yet. Run a platform or tenant backup to get started.
+            No exports yet. Run a manual export or wait for the daily auto-export.
           </div>
         ) : (
           <DataTable columns={columns} data={history} />
