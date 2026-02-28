@@ -406,6 +406,7 @@ export default function PlatformTenantDetailPage() {
           setEditBrand={setEditBrand}
           saving={savingBrand}
           onSave={handleSaveBrand}
+          tenantId={id}
         />
       )}
 
@@ -815,9 +816,37 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
 
 /* ─── Brand Tab ─── */
 
-function BrandTab({ editBrand, setEditBrand, saving, onSave }) {
+function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
+  const [uploading, setUploading] = useState(false);
+  const logoInputRef = useRef(null);
+
   function update(key, value) {
     setEditBrand((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleLogoUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file || !tenantId) return;
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const path = `${tenantId}/${Date.now()}_${safeName}`;
+      const { error: uploadError } = await supabase.storage
+        .from('tenant-logos')
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage
+        .from('tenant-logos')
+        .getPublicUrl(path);
+      update('brand_logo_url', urlData.publicUrl);
+    } catch (err) {
+      console.error('Logo upload failed:', err);
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
   }
 
   return (
@@ -857,20 +886,14 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave }) {
           </div>
         </div>
 
-        {/* Logo URL */}
+        {/* Logo */}
         <div className="p-5 flex flex-col md:flex-row md:items-start gap-2 md:gap-8">
           <div className="md:w-1/3">
-            <div className="text-sm font-medium text-dark-text">Logo URL</div>
-            <div className="text-xs text-secondary-text mt-0.5">Full URL to the tenant's logo image</div>
+            <div className="text-sm font-medium text-dark-text">Logo</div>
+            <div className="text-xs text-secondary-text mt-0.5">Upload an image or paste a URL. Displayed on login and sidebar.</div>
           </div>
           <div className="flex-1 space-y-3">
-            <input
-              type="text"
-              value={editBrand.brand_logo_url}
-              onChange={(e) => update('brand_logo_url', e.target.value)}
-              placeholder="https://example.com/logo.png"
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-            />
+            {/* Current logo preview */}
             {editBrand.brand_logo_url && (
               <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
                 <img
@@ -879,9 +902,55 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave }) {
                   className="h-10 max-w-[160px] object-contain"
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
-                <span className="text-xs text-secondary-text">Preview</span>
+                <span className="text-xs text-secondary-text flex-1">Current logo</span>
+                <button
+                  type="button"
+                  onClick={() => update('brand_logo_url', '')}
+                  className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
+                >
+                  <Trash2 size={12} /> Remove
+                </button>
               </div>
             )}
+
+            {/* Upload dropzone */}
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept=".png,.jpg,.jpeg,.svg,.webp"
+              onChange={handleLogoUpload}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => logoInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-amber-400 hover:bg-amber-50/30 transition-colors disabled:opacity-50"
+            >
+              {uploading ? (
+                <div className="flex items-center justify-center gap-2 text-sm text-secondary-text">
+                  <Loader2 size={16} className="animate-spin" /> Uploading...
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-1">
+                  <Upload size={20} className="text-gray-400" />
+                  <span className="text-sm text-secondary-text">Click to upload logo</span>
+                  <span className="text-xs text-gray-400">PNG, JPG, SVG, or WebP</span>
+                </div>
+              )}
+            </button>
+
+            {/* Paste URL fallback */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">or paste URL:</span>
+              <input
+                type="text"
+                value={editBrand.brand_logo_url}
+                onChange={(e) => update('brand_logo_url', e.target.value)}
+                placeholder="https://example.com/logo.png"
+                className="flex-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              />
+            </div>
           </div>
         </div>
 
