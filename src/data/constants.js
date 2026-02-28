@@ -35,13 +35,28 @@ export const STATUS = {
 
 export const NAV_ITEMS = [
   {
-    group: 'PLATFORM',
+    group: 'COMMAND CENTER',
     items: [
       { label: 'Dashboard', path: '/', icon: 'LayoutDashboard' },
+    ],
+  },
+  {
+    group: 'MANAGE',
+    items: [
       { label: 'Tenants', path: '/platform/tenants', icon: 'Building2' },
       { label: 'Agents', path: '/platform/agents', icon: 'Bot' },
-      { label: 'Usage', path: '/platform/usage', icon: 'Activity' },
+    ],
+  },
+  {
+    group: 'MONITOR',
+    items: [
+      { label: 'Usage & Analytics', path: '/platform/usage', icon: 'Activity' },
       { label: 'Backups', path: '/platform/backups', icon: 'HardDrive' },
+    ],
+  },
+  {
+    group: 'SYSTEM',
+    items: [
       { label: 'Settings', path: '/platform/settings', icon: 'Settings' },
     ],
   },

@@ -5,11 +5,12 @@ import {
   Puzzle, Bot, Lock, ToggleLeft, ToggleRight,
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
-  Plus, Mail, UserX, UserCheck, Palette, RefreshCw, ChevronRight, BarChart3,
+  Plus, Mail, Palette, RefreshCw, ChevronRight, BarChart3,
   GripVertical, Download, HardDrive, AlertTriangle, Wrench,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
+import TenantOverviewTab from './tabs/TenantOverviewTab';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
@@ -65,12 +66,6 @@ export default function PlatformTenantDetailPage() {
   const [savingModules, setSavingModules] = useState(false);
   const [savingOverride, setSavingOverride] = useState(null);
   const [error, setError] = useState(null);
-
-  // User management state
-  const [showAddUser, setShowAddUser] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({ name: '', email: '', password: '', role: 'user' });
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [userActionLoading, setUserActionLoading] = useState(null);
 
   const sourceAgents = getAllSourceAgents();
 
@@ -284,143 +279,11 @@ export default function PlatformTenantDetailPage() {
     setSavingBrand(false);
   }
 
-  async function handleCreateUser() {
-    if (!newUserForm.name.trim() || !newUserForm.email.trim() || !newUserForm.password || newUserForm.password.length < 6) return;
-    setCreatingUser(true);
-    setError(null);
-
-    try {
-      const token = await getFreshToken();
-      if (!token) throw new Error('Not authenticated — please sign in again');
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`;
-
-      const res = await fetch(functionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': anonKey,
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          email: newUserForm.email.trim(),
-          password: newUserForm.password,
-          name: newUserForm.name.trim(),
-          title: '',
-          role: newUserForm.role,
-          modules: [],
-          tenant_id: id,
-        }),
-      });
-
-      const result = await res.json();
-      if (!res.ok) {
-        setError(result.error || `Failed to create user (${res.status})`);
-      } else {
-        setNewUserForm({ name: '', email: '', password: '', role: 'user' });
-        setShowAddUser(false);
-        // Refresh users
-        const { data } = await supabase.from('profiles').select('id, name, email, role, active').eq('tenant_id', id).order('name');
-        setUsers(data || []);
-      }
-    } catch (err) {
-      setError('Could not reach admin-create-user: ' + err.message);
-    }
-    setCreatingUser(false);
-  }
-
-  async function handleResetPassword(userEmail) {
-    setUserActionLoading(userEmail);
-    setError(null);
-    try {
-      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(userEmail);
-      if (resetErr) {
-        setError(resetErr.message);
-      } else {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
-      }
-    } catch (err) {
-      setError(err.message);
-    }
-    setUserActionLoading(null);
-  }
-
-  async function handleToggleUserActive(user) {
-    setUserActionLoading(user.id);
-    setError(null);
-    const newActive = !user.active;
-    const { error: updateErr } = await supabase
-      .from('profiles')
-      .update({ active: newActive })
-      .eq('id', user.id);
-
-    if (updateErr) {
-      setError(updateErr.message);
-    } else {
-      setUsers((prev) => prev.map((u) => u.id === user.id ? { ...u, active: newActive } : u));
-    }
-    setUserActionLoading(null);
-  }
-
   function setTab(tabKey) {
     setError(null);
     setSaved(false);
     setSearchParams({ tab: tabKey }, { replace: true });
   }
-
-  const totalTokens = usage.reduce((sum, u) => sum + (u.tokens_input || 0) + (u.tokens_output || 0), 0);
-
-  const userColumns = [
-    { key: 'name', label: 'Name' },
-    { key: 'email', label: 'Email', render: (val) => <span className="text-xs text-secondary-text">{val}</span> },
-    {
-      key: 'role', label: 'Role',
-      render: (val) => {
-        const styles = val === 'platform_owner' ? 'bg-amber-50 text-amber-700'
-          : (val === 'admin' || val === 'super-admin') ? 'bg-purple-50 text-purple-700'
-          : val === 'manager' ? 'bg-blue-50 text-blue-700'
-          : 'bg-gray-100 text-gray-700';
-        return <span className={`px-2 py-0.5 text-xs font-medium rounded-full capitalize ${styles}`}>{val}</span>;
-      },
-    },
-    {
-      key: 'active', label: 'Status',
-      render: (val) => (
-        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${val ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-          {val ? 'Active' : 'Inactive'}
-        </span>
-      ),
-    },
-    {
-      key: 'id', label: 'Actions',
-      render: (_, row) => (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); handleResetPassword(row.email); }}
-            disabled={userActionLoading === row.email}
-            title="Send password reset email"
-            className="p-1 text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50"
-          >
-            {userActionLoading === row.email ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleToggleUserActive(row); }}
-            disabled={userActionLoading === row.id}
-            title={row.active ? 'Deactivate user' : 'Activate user'}
-            className={`p-1 transition-colors disabled:opacity-50 ${row.active ? 'text-gray-400 hover:text-red-500' : 'text-gray-400 hover:text-green-600'}`}
-          >
-            {userActionLoading === row.id ? <Loader2 size={14} className="animate-spin" /> : row.active ? <UserX size={14} /> : <UserCheck size={14} />}
-          </button>
-        </div>
-      ),
-    },
-  ];
-
-  const siteColumns = [
-    { key: 'name', label: 'Site Name' },
-    { key: 'address', label: 'Address', render: (val) => <span className="text-xs text-secondary-text">{val || '—'}</span> },
-  ];
 
   if (loading) {
     return (
@@ -488,239 +351,24 @@ export default function PlatformTenantDetailPage() {
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (
-        <>
-          {/* Info Card — Inline Edit */}
-          <div className="bg-white rounded-lg border border-gray-200">
-            <div className="p-5 flex flex-col md:flex-row md:items-end gap-4">
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-secondary-text mb-1">Company Name</label>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-secondary-text mb-1">Plan</label>
-                  <select
-                    value={editPlan}
-                    onChange={(e) => setEditPlan(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                  >
-                    {TIER_KEYS.map((key) => (
-                      <option key={key} value={key}>{TIER_REGISTRY[key].label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-secondary-text mb-1">Status</label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="suspended">Suspended</option>
-                  </select>
-                </div>
-              </div>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors shrink-0"
-              >
-                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                Save
-              </button>
-            </div>
-            <div className="border-t border-gray-100 px-5 py-3 flex gap-6 text-xs text-secondary-text">
-              <span>Slug: <strong className="font-mono">{tenant.slug}</strong></span>
-              <span>Created: {new Date(tenant.created_at).toLocaleDateString()}</span>
-              {tenant.modules && <span>Modules: {tenant.modules.join(', ')}</span>}
-            </div>
-          </div>
-
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-3">
-              <div className="p-2 bg-amber-50 rounded-lg"><Users size={18} className="text-amber-500" /></div>
-              <div>
-                <div className="text-2xl font-semibold text-dark-text">{users.length}</div>
-                <div className="text-xs text-secondary-text">Users</div>
-              </div>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-3">
-              <div className="p-2 bg-amber-50 rounded-lg"><MapPin size={18} className="text-amber-500" /></div>
-              <div>
-                <div className="text-2xl font-semibold text-dark-text">{sites.length}</div>
-                <div className="text-xs text-secondary-text">Sites</div>
-              </div>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-3">
-              <div className="p-2 bg-amber-50 rounded-lg"><Activity size={18} className="text-amber-500" /></div>
-              <div>
-                <div className="text-2xl font-semibold text-dark-text">{totalTokens.toLocaleString()}</div>
-                <div className="text-xs text-secondary-text">Total Tokens (last 100 calls)</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Dashboards & Action Plans */}
-          {tenant?.module_config?.dashboards && (
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h2 className="text-sm font-semibold text-dark-text mb-3 flex items-center gap-2">
-                <Activity size={16} className="text-amber-500" />
-                Dashboards & Action Plans
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <span className="text-secondary-text">Module</span>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                    <span className="font-medium text-dark-text">Enabled</span>
-                  </div>
-                </div>
-                <div>
-                  <span className="text-secondary-text">Action Plans</span>
-                  <div className="mt-1 font-medium text-dark-text">
-                    {dashboardStats.total} generated ({dashboardStats.open} open)
-                  </div>
-                </div>
-                <div>
-                  <span className="text-secondary-text">Last Generated</span>
-                  <div className="mt-1 font-medium text-dark-text">
-                    {dashboardStats.lastGenerated
-                      ? new Date(dashboardStats.lastGenerated).toLocaleDateString()
-                      : 'Never'}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Users Table */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-dark-text">Users ({users.length})</h2>
-              <button
-                onClick={() => setShowAddUser(!showAddUser)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
-              >
-                <Plus size={14} />
-                Add User
-              </button>
-            </div>
-
-            {showAddUser && (
-              <div className="bg-white rounded-lg border border-amber-200 p-4 mb-3 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-secondary-text mb-1">Name</label>
-                    <input
-                      type="text"
-                      value={newUserForm.name}
-                      onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                      placeholder="Full name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-secondary-text mb-1">Email</label>
-                    <input
-                      type="email"
-                      value={newUserForm.email}
-                      onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                      placeholder="email@company.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-secondary-text mb-1">Password</label>
-                    <input
-                      type="password"
-                      value={newUserForm.password}
-                      onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                      placeholder="Min 6 characters"
-                      autoComplete="new-password"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-secondary-text mb-1">Role</label>
-                    <select
-                      value={newUserForm.role}
-                      onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value })}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
-                    >
-                      <option value="user">User</option>
-                      <option value="manager">Manager</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleCreateUser}
-                    disabled={creatingUser || !newUserForm.name.trim() || !newUserForm.email.trim() || newUserForm.password.length < 6}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
-                  >
-                    {creatingUser ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                    Create User
-                  </button>
-                  <button
-                    onClick={() => { setShowAddUser(false); setNewUserForm({ name: '', email: '', password: '', role: 'user' }); }}
-                    className="px-3 py-1.5 text-sm text-secondary-text hover:text-dark-text transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {users.length > 0 ? (
-              <DataTable columns={userColumns} data={users} />
-            ) : (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-sm text-secondary-text">
-                No users assigned to this tenant.
-              </div>
-            )}
-          </div>
-
-          {/* Sites Table */}
-          <div>
-            <h2 className="text-sm font-semibold text-dark-text mb-3">Sites ({sites.length})</h2>
-            {sites.length > 0 ? (
-              <DataTable columns={siteColumns} data={sites} />
-            ) : (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-sm text-secondary-text">
-                No sites configured for this tenant.
-              </div>
-            )}
-          </div>
-
-          {/* Usage Summary */}
-          <div>
-            <h2 className="text-sm font-semibold text-dark-text mb-3">Recent Usage ({usage.length} calls)</h2>
-            {usage.length > 0 ? (
-              <DataTable
-                columns={[
-                  { key: 'agent_key', label: 'Agent', render: (val) => <span className="font-mono text-xs">{val || '—'}</span> },
-                  { key: 'tokens_input', label: 'Input Tokens', render: (val) => (val || 0).toLocaleString() },
-                  { key: 'tokens_output', label: 'Output Tokens', render: (val) => (val || 0).toLocaleString() },
-                  { key: 'created_at', label: 'Date', render: (val) => new Date(val).toLocaleString() },
-                ]}
-                data={usage}
-              />
-            ) : (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-sm text-secondary-text">
-                No usage data yet.
-              </div>
-            )}
-          </div>
-        </>
+        <TenantOverviewTab
+          tenant={tenant}
+          users={users}
+          sites={sites}
+          usage={usage}
+          editName={editName}
+          editPlan={editPlan}
+          editStatus={editStatus}
+          setEditName={setEditName}
+          setEditPlan={setEditPlan}
+          setEditStatus={setEditStatus}
+          saving={saving}
+          onSave={handleSave}
+          error={error}
+          setError={setError}
+          saved={saved}
+          setSaved={setSaved}
+        />
       )}
 
       {/* Features Tab */}
