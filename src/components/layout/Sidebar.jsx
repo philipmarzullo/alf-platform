@@ -34,11 +34,14 @@ export default function Sidebar() {
     <aside className={`fixed top-0 left-0 h-screen bg-alf-dark flex flex-col z-40 transition-all duration-200 ${
       isDesktop ? 'w-56' : 'w-64'
     }`}>
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-4 h-14 border-b border-white/10 shrink-0">
-        <AlfMark variant="dark" size="sm" />
+      {/* Logo + tagline */}
+      <div className="flex items-center justify-between px-4 h-14 border-b border-white/10 shrink-0">
+        <div className="flex flex-col">
+          <AlfMark variant="dark" size="sm" />
+          <span className="text-[9px] font-light tracking-[3px] text-white/30 mt-1 uppercase">Melmac Intelligence</span>
+        </div>
         {!isDesktop && (
-          <button onClick={() => setMobileOpen(false)} className="ml-auto text-white/60 hover:text-white">
+          <button onClick={() => setMobileOpen(false)} className="text-white/60 hover:text-white">
             <X size={20} />
           </button>
         )}

@@ -76,7 +76,6 @@ export default function PlatformTenantDetailPage() {
 
   // Brand tab state
   const [editBrand, setEditBrand] = useState({
-    brand_display_name: '',
     brand_logo_url: '',
     brand_primary_color: '#009ADE',
     brand_sidebar_bg: '#1B2133',
@@ -115,7 +114,6 @@ export default function PlatformTenantDetailPage() {
     setEditPlan(t.plan || 'melmac');
     setEditStatus(t.status || 'active');
     setEditBrand({
-      brand_display_name: t.brand_display_name || '',
       brand_logo_url: t.brand_logo_url || '',
       brand_primary_color: t.brand_primary_color || '#009ADE',
       brand_sidebar_bg: t.brand_sidebar_bg || '#1B2133',
@@ -869,23 +867,6 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
-        {/* Display Name */}
-        <div className="p-5 flex flex-col md:flex-row md:items-center gap-2 md:gap-8">
-          <div className="md:w-1/3">
-            <div className="text-sm font-medium text-dark-text">Display Name</div>
-            <div className="text-xs text-secondary-text mt-0.5">Overrides company name in the tenant portal header</div>
-          </div>
-          <div className="flex-1">
-            <input
-              type="text"
-              value={editBrand.brand_display_name}
-              onChange={(e) => update('brand_display_name', e.target.value)}
-              placeholder="e.g., A&A Portal"
-              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
-            />
-          </div>
-        </div>
-
         {/* Logo */}
         <div className="p-5 flex flex-col md:flex-row md:items-start gap-2 md:gap-8">
           <div className="md:w-1/3">
