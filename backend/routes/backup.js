@@ -20,7 +20,7 @@ router.use(requirePlatformAdmin);
 // Constants
 // ──────────────────────────────────────────────
 const EXPORT_TABLES = [
-  { key: 'profiles',              table: 'profiles',                select: 'id, name, email, role, department, dashboard_template_id, created_at' },
+  { key: 'profiles',              table: 'profiles',                select: 'id, name, email, role, title, modules, active, tenant_id, dashboard_template_id, created_at' },
   { key: 'sites',                 table: 'tenant_sites' },
   { key: 'clientContacts',        table: 'client_contacts' },
   { key: 'documents',             table: 'tenant_documents' },
