@@ -36,9 +36,9 @@ export default function Sidebar() {
     }`}>
       {/* Logo + tagline */}
       <div className="flex items-center justify-between px-4 h-14 border-b border-white/10 shrink-0">
-        <div className="flex flex-col">
+        <div className="flex items-center gap-3">
           <AlfMark variant="dark" size="sm" />
-          <span className="text-[9px] font-light tracking-[3px] text-white/30 mt-1 uppercase">Melmac Intelligence</span>
+          <span className="text-[9px] font-light tracking-[3px] text-white/30 uppercase">Melmac Intelligence</span>
         </div>
         {!isDesktop && (
           <button onClick={() => setMobileOpen(false)} className="text-white/60 hover:text-white">
