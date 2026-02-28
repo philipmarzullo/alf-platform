@@ -80,6 +80,86 @@ router.get('/tables', requirePlatformAdmin, async (req, res) => {
   res.json(tables);
 });
 
+// ─── Sync Health Check ─────────────────────────────────────────────────
+
+/**
+ * GET /:tenantId/health — Sync health status for dashboards.
+ * Any authenticated user in the tenant can read this.
+ * Returns: { status, credential_active, last_sync_at, last_sync_status, connector_type }
+ *
+ * Status values:
+ *   "no_source"  — no sync_config exists (tenant hasn't configured a data source)
+ *   "inactive"   — credential is missing, inactive, or sync_config is deactivated
+ *   "stale"      — last successful sync is older than 48 hours
+ *   "healthy"    — credential active and recent sync exists
+ */
+router.get('/:tenantId/health', requireTenantAccess, async (req, res) => {
+  const tenantId = req.params.tenantId;
+  const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 hours
+
+  try {
+    // 1. Check for any sync config
+    const { data: configs, error: cfgErr } = await req.supabase
+      .from('sync_configs')
+      .select('id, connector_type, is_active, last_sync_at, last_sync_status')
+      .eq('tenant_id', tenantId)
+      .limit(1)
+      .maybeSingle();
+
+    if (cfgErr) throw cfgErr;
+
+    if (!configs) {
+      return res.json({ status: 'no_source', credential_active: false, last_sync_at: null });
+    }
+
+    const cfg = configs;
+
+    // 2. Check credential status for this connector type
+    const { data: cred } = await req.supabase
+      .from('tenant_api_credentials')
+      .select('is_active')
+      .eq('tenant_id', tenantId)
+      .eq('service_type', cfg.connector_type)
+      .maybeSingle();
+
+    const credentialActive = !!cred?.is_active;
+
+    // 3. If config is deactivated or credential is missing/inactive → "inactive"
+    if (!cfg.is_active || !credentialActive) {
+      return res.json({
+        status: 'inactive',
+        credential_active: credentialActive,
+        config_active: cfg.is_active,
+        connector_type: cfg.connector_type,
+        last_sync_at: cfg.last_sync_at,
+      });
+    }
+
+    // 4. Get last successful sync
+    const { data: lastSync } = await req.supabase
+      .from('sync_logs')
+      .select('completed_at, status')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'success')
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const lastSyncAt = lastSync?.completed_at || cfg.last_sync_at || null;
+    const isStale = lastSyncAt && (Date.now() - new Date(lastSyncAt).getTime()) > STALE_THRESHOLD_MS;
+
+    return res.json({
+      status: isStale ? 'stale' : 'healthy',
+      credential_active: true,
+      connector_type: cfg.connector_type,
+      last_sync_at: lastSyncAt,
+    });
+  } catch (err) {
+    console.error('[sync] Health check error:', err.message);
+    res.status(500).json({ error: 'Failed to check sync health' });
+  }
+});
+
 // ─── Sync Config Routes ────────────────────────────────────────────────
 
 /**
