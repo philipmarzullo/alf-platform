@@ -3,6 +3,9 @@ import { encryptCredential, decryptCredential, getKeyHint } from '../lib/credent
 
 const router = Router();
 
+// Service types only platform owners can manage (never exposed to tenant super-admins)
+const PLATFORM_ONLY_SERVICES = ['anthropic'];
+
 // Service types that support test calls
 const TEST_ENDPOINTS = {
   anthropic: {
@@ -26,18 +29,50 @@ const TEST_ENDPOINTS = {
 };
 
 /**
- * Guard: only platform admins (super-admin, platform_owner) can manage credentials.
+ * Guard: credential access with tenant scoping.
+ * - platform_owner → full access to any tenant
+ * - super-admin → own tenant only (tenant_id must match route param)
+ * - all others → 403
  */
-function requirePlatformAdmin(req, res, next) {
+function requireCredentialAccess(req, res, next) {
   const role = req.user?.role;
-  if (role !== 'super-admin' && role !== 'platform_owner') {
-    return res.status(403).json({ error: 'Platform admin access required' });
+
+  if (role === 'platform_owner') return next();
+
+  if (role === 'super-admin') {
+    const routeTenantId = req.params.tenantId;
+    // For credential-ID routes, tenant check happens after fetching the credential
+    if (!routeTenantId) return next();
+    if (req.user.tenant_id === routeTenantId) return next();
+    return res.status(403).json({ error: 'Access denied — wrong tenant' });
   }
-  next();
+
+  return res.status(403).json({ error: 'Credential management access required' });
 }
 
-// All routes require platform admin
-router.use(requirePlatformAdmin);
+// All routes require credential access
+router.use(requireCredentialAccess);
+
+/**
+ * Write an immutable audit log entry for credential operations.
+ * Fire-and-forget — never blocks the response.
+ */
+function logCredentialAction(supabase, { tenantId, credentialId, serviceType, action, detail, user }) {
+  supabase
+    .from('credential_audit_logs')
+    .insert({
+      tenant_id: tenantId,
+      credential_id: credentialId,
+      service_type: serviceType,
+      action,
+      detail: detail || {},
+      user_id: user.id,
+      user_name: user.name || null,
+    })
+    .then(({ error }) => {
+      if (error) console.warn('[credentials] Audit log failed:', error.message);
+    });
+}
 
 /**
  * GET /:tenantId — List credentials for a tenant (masked).
@@ -52,7 +87,13 @@ router.get('/:tenantId', async (req, res) => {
       .order('service_type');
 
     if (error) throw error;
-    res.json(data);
+
+    // Non-platform_owner users never see platform-only credentials
+    const filtered = req.user.role === 'platform_owner'
+      ? data
+      : data.filter(c => !PLATFORM_ONLY_SERVICES.includes(c.service_type));
+
+    res.json(filtered);
   } catch (err) {
     console.error('[credentials] List error:', err.message);
     res.status(500).json({ error: 'Failed to list credentials' });
@@ -68,6 +109,10 @@ router.post('/:tenantId', async (req, res) => {
 
   if (!service_type || !key) {
     return res.status(400).json({ error: 'service_type and key are required' });
+  }
+
+  if (PLATFORM_ONLY_SERVICES.includes(service_type) && req.user.role !== 'platform_owner') {
+    return res.status(403).json({ error: 'Only platform owners can manage this service type' });
   }
 
   try {
@@ -94,6 +139,15 @@ router.post('/:tenantId', async (req, res) => {
     // Invalidate cache for this tenant
     invalidateCredentialCache(req.params.tenantId);
 
+    logCredentialAction(req.supabase, {
+      tenantId: req.params.tenantId,
+      credentialId: data.id,
+      serviceType: service_type,
+      action: 'created',
+      detail: { label: label || null, key_hint },
+      user: req.user,
+    });
+
     console.log(`[credentials] ${service_type} key saved for tenant ${req.params.tenantId} (hint: ...${key_hint})`);
     res.status(201).json(data);
   } catch (err) {
@@ -103,13 +157,46 @@ router.post('/:tenantId', async (req, res) => {
 });
 
 /**
+ * Fetch a credential and verify the caller has access:
+ * - platform_owner → always allowed
+ * - super-admin → must own the tenant, credential must not be platform-only
+ */
+async function fetchAndAuthorize(req, res) {
+  const { data: cred, error } = await req.supabase
+    .from('tenant_api_credentials')
+    .select('id, tenant_id, service_type, encrypted_key, credential_label, key_hint, is_active, created_at, updated_at')
+    .eq('id', req.params.credentialId)
+    .single();
+
+  if (error || !cred) {
+    res.status(404).json({ error: 'Credential not found' });
+    return null;
+  }
+
+  if (req.user.role !== 'platform_owner') {
+    if (PLATFORM_ONLY_SERVICES.includes(cred.service_type)) {
+      res.status(403).json({ error: 'Only platform owners can manage this service type' });
+      return null;
+    }
+    if (req.user.tenant_id !== cred.tenant_id) {
+      res.status(403).json({ error: 'Access denied — wrong tenant' });
+      return null;
+    }
+  }
+
+  return cred;
+}
+
+/**
  * PUT /:credentialId — Update key, label, or status.
  * Body: { key?, label?, is_active? }
  */
 router.put('/:credentialId', async (req, res) => {
-  const { key, label, is_active } = req.body;
-
   try {
+    const cred = await fetchAndAuthorize(req, res);
+    if (!cred) return; // response already sent
+
+    const { key, label, is_active } = req.body;
     const updates = { updated_at: new Date().toISOString() };
 
     if (key) {
@@ -128,9 +215,22 @@ router.put('/:credentialId', async (req, res) => {
 
     if (error) throw error;
 
-    // Invalidate cache for this tenant
-    invalidateCredentialCache(data.tenant_id);
+    // Determine if this was a toggle vs a general update
+    const isToggle = is_active !== undefined && !key && label === undefined;
+    logCredentialAction(req.supabase, {
+      tenantId: data.tenant_id,
+      credentialId: data.id,
+      serviceType: data.service_type,
+      action: isToggle ? 'toggled' : 'updated',
+      detail: {
+        ...(is_active !== undefined && { is_active }),
+        ...(key && { key_hint: updates.key_hint }),
+        ...(label !== undefined && { label }),
+      },
+      user: req.user,
+    });
 
+    invalidateCredentialCache(data.tenant_id);
     res.json(data);
   } catch (err) {
     console.error('[credentials] Update error:', err.message);
@@ -143,12 +243,8 @@ router.put('/:credentialId', async (req, res) => {
  */
 router.delete('/:credentialId', async (req, res) => {
   try {
-    // Get tenant_id before deleting for cache invalidation
-    const { data: existing } = await req.supabase
-      .from('tenant_api_credentials')
-      .select('tenant_id')
-      .eq('id', req.params.credentialId)
-      .single();
+    const cred = await fetchAndAuthorize(req, res);
+    if (!cred) return;
 
     const { error } = await req.supabase
       .from('tenant_api_credentials')
@@ -157,8 +253,16 @@ router.delete('/:credentialId', async (req, res) => {
 
     if (error) throw error;
 
-    if (existing?.tenant_id) invalidateCredentialCache(existing.tenant_id);
+    logCredentialAction(req.supabase, {
+      tenantId: cred.tenant_id,
+      credentialId: cred.id,
+      serviceType: cred.service_type,
+      action: 'deleted',
+      detail: { label: cred.credential_label, key_hint: cred.key_hint },
+      user: req.user,
+    });
 
+    invalidateCredentialCache(cred.tenant_id);
     res.json({ success: true });
   } catch (err) {
     console.error('[credentials] Delete error:', err.message);
@@ -171,15 +275,8 @@ router.delete('/:credentialId', async (req, res) => {
  */
 router.post('/:credentialId/test', async (req, res) => {
   try {
-    const { data: cred, error } = await req.supabase
-      .from('tenant_api_credentials')
-      .select('encrypted_key, service_type')
-      .eq('id', req.params.credentialId)
-      .single();
-
-    if (error || !cred) {
-      return res.status(404).json({ error: 'Credential not found' });
-    }
+    const cred = await fetchAndAuthorize(req, res);
+    if (!cred) return;
 
     const testConfig = TEST_ENDPOINTS[cred.service_type];
     if (!testConfig) {
@@ -191,17 +288,49 @@ router.post('/:credentialId/test', async (req, res) => {
     const response = await fetch(testConfig.url, fetchOpts);
     const body = await response.json();
 
-    if (response.ok) {
-      res.json({ success: true, message: 'API key is valid' });
-    } else {
-      res.json({
-        success: false,
-        message: body.error?.message || `API returned ${response.status}`,
-      });
-    }
+    const testResult = response.ok
+      ? { success: true, message: 'API key is valid' }
+      : { success: false, message: body.error?.message || `API returned ${response.status}` };
+
+    logCredentialAction(req.supabase, {
+      tenantId: cred.tenant_id,
+      credentialId: cred.id,
+      serviceType: cred.service_type,
+      action: 'tested',
+      detail: { result: testResult.success ? 'success' : 'failure', message: testResult.message },
+      user: req.user,
+    });
+
+    res.json(testResult);
   } catch (err) {
     console.error('[credentials] Test error:', err.message);
     res.status(500).json({ error: 'Failed to test credential' });
+  }
+});
+
+/**
+ * GET /:tenantId/audit-log — Recent credential activity for a tenant.
+ */
+router.get('/:tenantId/audit-log', async (req, res) => {
+  try {
+    const { data, error } = await req.supabase
+      .from('credential_audit_logs')
+      .select('id, credential_id, service_type, action, detail, user_name, created_at')
+      .eq('tenant_id', req.params.tenantId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+
+    // Non-platform_owner users don't see audit entries for platform-only services
+    const filtered = req.user.role === 'platform_owner'
+      ? data
+      : data.filter(e => !PLATFORM_ONLY_SERVICES.includes(e.service_type));
+
+    res.json(filtered);
+  } catch (err) {
+    console.error('[credentials] Audit log read error:', err.message);
+    res.status(500).json({ error: 'Failed to load audit log' });
   }
 });
 
