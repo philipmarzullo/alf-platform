@@ -454,10 +454,30 @@ router.post('/:tenantId/action-plan', rateLimit, async (req, res) => {
   }
 });
 
+// Department → minimum sensitivity tier required to see actions from that domain
+const DEPT_SENSITIVITY = {
+  operations: 'operational',
+  labor: 'financial',
+  quality: 'managerial',
+  timekeeping: 'operational',
+  safety: 'operational',
+  hr: 'operational',
+  finance: 'financial',
+  sales: 'operational',
+  purchasing: 'operational',
+  ops: 'operational',
+};
+
+const TIER_LEVEL = { operational: 0, managerial: 1, financial: 2 };
+
 /**
  * GET /api/dashboards/:tenantId/action-plans
  *
  * List action plan items for a tenant.
+ * Query params:
+ *   - departments: comma-separated department filter (e.g. "labor,timekeeping")
+ *   - status: comma-separated status filter (e.g. "open,in_progress")
+ *   - limit: max results (for compact workspace views)
  */
 router.get('/:tenantId/action-plans', async (req, res) => {
   const { tenantId } = req.params;
@@ -472,15 +492,69 @@ router.get('/:tenantId/action-plans', async (req, res) => {
   }
 
   try {
-    const { data: actions, error } = await req.supabase
+    let query = req.supabase
       .from('automation_actions')
       .select('*')
       .eq('tenant_id', effectiveTenantId)
       .eq('source', 'dashboard_action_plan')
       .order('created_at', { ascending: false });
 
+    // Department filter (for workspace-level views)
+    const deptFilter = req.query.departments;
+    if (deptFilter) {
+      const depts = deptFilter.split(',').map(d => d.trim()).filter(Boolean);
+      if (depts.length) query = query.in('department', depts);
+    }
+
+    // Status filter
+    const statusFilter = req.query.status;
+    if (statusFilter) {
+      const statuses = statusFilter.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length) query = query.in('status', statuses);
+    }
+
+    // Result limit
+    const limit = parseInt(req.query.limit, 10);
+    if (limit > 0) query = query.limit(limit);
+
+    const { data: actions, error } = await query;
     if (error) throw error;
-    res.json({ actions: actions || [] });
+
+    let filtered = actions || [];
+
+    // RBAC: admins bypass all filtering
+    const isAdmin = PLATFORM_ROLES.includes(req.user?.role) ||
+      ['admin', 'super-admin'].includes(req.user?.role);
+
+    if (!isAdmin) {
+      // Metric tier filtering — exclude actions from departments above user's tier
+      const template = await getUserTemplate(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+      const userTierLevel = TIER_LEVEL[template.metric_tier] ?? 0;
+
+      filtered = filtered.filter(a => {
+        const deptSensitivity = DEPT_SENSITIVITY[a.department] || 'operational';
+        return userTierLevel >= (TIER_LEVEL[deptSensitivity] ?? 0);
+      });
+
+      // Site scoping — filter by user's assigned sites
+      const scopedJobIds = await getUserScopedJobIds(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+      if (scopedJobIds && scopedJobIds.length > 0) {
+        // Look up job names for the user's assigned sites
+        const { data: jobs } = await req.supabase
+          .from('sf_dim_job')
+          .select('job_name')
+          .in('id', scopedJobIds);
+
+        if (jobs && jobs.length > 0) {
+          const siteNames = new Set(jobs.map(j => j.job_name));
+          filtered = filtered.filter(a =>
+            !a.site_name || siteNames.has(a.site_name)
+          );
+        }
+      }
+    }
+
+    res.json({ actions: filtered });
   } catch (err) {
     console.error('[dashboards] Action plans fetch error:', err.message);
     res.status(500).json({ error: 'Failed to fetch action plans' });
