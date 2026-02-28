@@ -41,6 +41,7 @@ export const NAV_ITEMS = [
       { label: 'Tenants', path: '/platform/tenants', icon: 'Building2' },
       { label: 'Agents', path: '/platform/agents', icon: 'Bot' },
       { label: 'Usage', path: '/platform/usage', icon: 'Activity' },
+      { label: 'Backups', path: '/platform/backups', icon: 'HardDrive' },
       { label: 'Settings', path: '/platform/settings', icon: 'Settings' },
     ],
   },

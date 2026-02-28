@@ -3472,17 +3472,27 @@ const BACKUP_CATEGORIES = [
 
 const BACKEND_URL_BACKUP = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
 
+function formatBackupBytes(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
 function BackupTab({ tenantId, tenantSlug }) {
   const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
-  const [exporting, setExporting] = useState(false);
-  const [lastExport, setLastExport] = useState(() => {
-    try { return localStorage.getItem(`backup_last_${tenantId}`) || null; } catch { return null; }
-  });
+  const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [saveResult, setSaveResult] = useState(null);
   const [exportError, setExportError] = useState(null);
+  const [recentBackups, setRecentBackups] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
 
   useEffect(() => {
     loadSummary();
+    loadRecentBackups();
   }, [tenantId]);
 
   async function loadSummary() {
@@ -3502,8 +3512,50 @@ function BackupTab({ tenantId, tenantSlug }) {
     }
   }
 
-  async function handleExport() {
-    setExporting(true);
+  async function loadRecentBackups() {
+    setLoadingHistory(true);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${BACKEND_URL_BACKUP}/api/backup/history?tenantId=${tenantId}&limit=5`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load history');
+      const data = await res.json();
+      setRecentBackups(data);
+    } catch (err) {
+      console.error('[backup] History error:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setExportError(null);
+    setSaveResult(null);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${BACKEND_URL_BACKUP}/api/backup/${tenantId}/export`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Save failed');
+      }
+      const data = await res.json();
+      setSaveResult(data);
+      loadRecentBackups();
+    } catch (err) {
+      console.error('[backup] Save error:', err);
+      setExportError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDownload() {
+    setDownloading(true);
     setExportError(null);
     try {
       const token = await getFreshToken();
@@ -3515,7 +3567,6 @@ function BackupTab({ tenantId, tenantSlug }) {
         throw new Error(err.error || 'Export failed');
       }
 
-      // Extract filename from Content-Disposition or build a fallback
       const disposition = res.headers.get('Content-Disposition');
       let filename = `${(tenantSlug || 'tenant').replace(/[^a-z0-9]/gi, '-')}_backup_${new Date().toISOString().slice(0, 10)}.json`;
       if (disposition) {
@@ -3532,19 +3583,16 @@ function BackupTab({ tenantId, tenantSlug }) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-
-      const now = new Date().toISOString();
-      setLastExport(now);
-      try { localStorage.setItem(`backup_last_${tenantId}`, now); } catch {}
     } catch (err) {
-      console.error('[backup] Export error:', err);
+      console.error('[backup] Download error:', err);
       setExportError(err.message);
     } finally {
-      setExporting(false);
+      setDownloading(false);
     }
   }
 
   const totalRows = summary ? Object.values(summary).reduce((a, b) => a + b, 0) : 0;
+  const lastBackup = recentBackups[0];
 
   return (
     <div className="space-y-6">
@@ -3557,26 +3605,33 @@ function BackupTab({ tenantId, tenantSlug }) {
               Tenant Data Export
             </h3>
             <p className="text-sm text-secondary-text mt-1">
-              Download a complete JSON snapshot of this tenant's data — knowledge base, tool submissions, user profiles, dashboard configs, and more.
+              Save a backup to cloud storage or download a JSON snapshot directly.
             </p>
           </div>
-          <button
-            onClick={handleExport}
-            disabled={exporting || loadingSummary}
-            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {exporting ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download size={16} />
-                Export Tenant Data
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSave}
+              disabled={saving || downloading || loadingSummary}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? (
+                <><Loader2 size={16} className="animate-spin" /> Saving...</>
+              ) : (
+                <><HardDrive size={16} /> Save Backup</>
+              )}
+            </button>
+            <button
+              onClick={handleDownload}
+              disabled={saving || downloading || loadingSummary}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white text-dark-text text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {downloading ? (
+                <><Loader2 size={16} className="animate-spin" /> Downloading...</>
+              ) : (
+                <><Download size={16} /> Download</>
+              )}
+            </button>
+          </div>
         </div>
 
         {exportError && (
@@ -3585,9 +3640,23 @@ function BackupTab({ tenantId, tenantSlug }) {
           </div>
         )}
 
-        {lastExport && (
+        {saveResult && (
+          <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+            <CheckCircle size={16} className="text-green-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-green-800">
+              <p className="font-medium">Backup saved — {saveResult.fileSizeFormatted}, {saveResult.totalRows.toLocaleString()} rows</p>
+              {saveResult.downloadUrl && (
+                <a href={saveResult.downloadUrl} download className="inline-flex items-center gap-1 mt-1 text-green-700 hover:text-green-900 font-medium text-xs">
+                  <Download size={12} /> Download
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
+        {lastBackup && !saveResult && (
           <p className="mt-3 text-xs text-secondary-text">
-            Last export: {new Date(lastExport).toLocaleString()}
+            Last backup: {new Date(lastBackup.created_at).toLocaleString()}
           </p>
         )}
       </div>
@@ -3622,6 +3691,29 @@ function BackupTab({ tenantId, tenantSlug }) {
           </div>
         )}
       </div>
+
+      {/* Recent Backups */}
+      {!loadingHistory && recentBackups.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h4 className="text-sm font-semibold text-dark-text mb-3">Recent Backups</h4>
+          <div className="space-y-2">
+            {recentBackups.map((b) => (
+              <div key={b.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-dark-text">{new Date(b.created_at).toLocaleString()}</span>
+                  <span className="text-xs font-mono text-secondary-text">{formatBackupBytes(b.file_size_bytes)}</span>
+                  <span className="text-xs text-secondary-text">{(b.row_count || 0).toLocaleString()} rows</span>
+                </div>
+                {b.downloadUrl && (
+                  <a href={b.downloadUrl} download className="p-1 text-secondary-text hover:text-dark-text transition-colors" title="Download">
+                    <Download size={14} />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Exclusions Notice */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">

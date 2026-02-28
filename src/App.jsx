@@ -17,6 +17,7 @@ import {
   PlatformAgentDetailPage,
   PlatformUsagePage,
   PlatformSettingsPage,
+  PlatformBackupsPage,
 } from './pages/platform';
 import { Loader2 } from 'lucide-react';
 
@@ -28,6 +29,7 @@ function usePageContext() {
   if (pathname === '/platform/agents') return 'Agents — managing global agent definitions, models, and system prompts';
   if (pathname.startsWith('/platform/agents/')) return 'Agent detail — editing agent config, viewing tenant assignments';
   if (pathname === '/platform/usage') return 'Usage — viewing agent call logs and token consumption';
+  if (pathname === '/platform/backups') return 'Backups — platform-wide and per-tenant backup management';
   if (pathname === '/platform/settings') return 'Settings — platform config, API keys, and platform user management';
   return 'Alf Platform';
 }
@@ -105,6 +107,7 @@ export default function App() {
           <Route path="/platform/agents" element={<PlatformAgentsPage />} />
           <Route path="/platform/agents/:agentKey" element={<PlatformAgentDetailPage />} />
           <Route path="/platform/usage" element={<PlatformUsagePage />} />
+          <Route path="/platform/backups" element={<PlatformBackupsPage />} />
           <Route path="/platform/settings" element={<PlatformSettingsPage />} />
           {/* Redirects from old routes */}
           <Route path="/platform/config" element={<Navigate to="/platform/settings" replace />} />

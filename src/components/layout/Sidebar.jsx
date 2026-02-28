@@ -6,11 +6,11 @@ import useMediaQuery from '../../hooks/useMediaQuery';
 import { NAV_ITEMS } from '../../data/constants';
 import {
   LayoutDashboard, Building2, Bot, Activity, Settings,
-  Menu, X, LogOut,
+  Menu, X, LogOut, HardDrive,
 } from 'lucide-react';
 
 const ICON_MAP = {
-  LayoutDashboard, Building2, Bot, Activity, Settings,
+  LayoutDashboard, Building2, Bot, Activity, Settings, HardDrive,
 };
 
 export default function Sidebar() {
