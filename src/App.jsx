@@ -20,6 +20,7 @@ import {
   PlatformBackupsPage,
 } from './pages/platform';
 import { Loader2 } from 'lucide-react';
+import AlfMark from './components/shared/AlfMark';
 
 function usePageContext() {
   const { pathname } = useLocation();
@@ -55,7 +56,7 @@ function ProtectedRoute({ children }) {
   if (profileLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <Loader2 size={24} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -63,7 +64,7 @@ function ProtectedRoute({ children }) {
   if (!isPlatformOwner) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-light-bg text-center px-4">
-        <img src="/alf-logo.jpg" alt="Alf" className="w-16 h-16 rounded-full mb-4" />
+        <AlfMark size={56} className="mb-4" />
         <h2 className="text-xl font-semibold text-dark-text mb-2">Access Denied</h2>
         <p className="text-sm text-secondary-text max-w-md mb-6">
           This portal is restricted to platform owners. If you believe this is an error, contact the platform administrator.
@@ -81,7 +82,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-light-bg">
-        <Loader2 size={32} className="text-amber-500 animate-spin" />
+        <Loader2 size={32} className="text-alf-orange animate-spin" />
       </div>
     );
   }

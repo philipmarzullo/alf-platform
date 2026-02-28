@@ -176,7 +176,7 @@ export default function PlatformAgentsPage() {
         <button
           onClick={handleSeed}
           disabled={seeding || loading}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
         >
           {seeding ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
           {seeding ? 'Seeding...' : 'Seed All to Database'}
@@ -198,7 +198,7 @@ export default function PlatformAgentsPage() {
       {/* Loading */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 size={24} className="text-amber-500 animate-spin" />
+          <Loader2 size={24} className="text-alf-orange animate-spin" />
         </div>
       ) : agents.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
@@ -285,7 +285,7 @@ export default function PlatformAgentsPage() {
                               <td className="px-4 py-2.5 text-right">
                                 <button
                                   onClick={() => navigate(`/platform/agents/${agent.key}`)}
-                                  className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                                  className="text-xs text-alf-orange hover:text-alf-orange font-medium"
                                 >
                                   Edit Agent →
                                 </button>
@@ -348,7 +348,7 @@ export default function PlatformAgentsPage() {
                           <td className="px-4 py-2.5 text-right">
                             <button
                               onClick={() => navigate(`/platform/agents/${agent.key}`)}
-                              className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                              className="text-xs text-alf-orange hover:text-alf-orange font-medium"
                             >
                               Edit Agent →
                             </button>

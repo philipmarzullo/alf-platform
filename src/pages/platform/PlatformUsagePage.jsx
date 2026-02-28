@@ -87,7 +87,7 @@ export default function PlatformUsagePage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <Loader2 size={24} className="text-alf-orange animate-spin" />
       </div>
     );
   }

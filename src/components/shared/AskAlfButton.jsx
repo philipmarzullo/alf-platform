@@ -9,7 +9,7 @@ export default function AskAlfButton({ pageContext }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-30 w-12 h-12 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
+        className="fixed bottom-6 right-6 z-30 w-12 h-12 bg-alf-orange hover:bg-alf-orange text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
         title="Ask Alf"
       >
         <Bot size={22} />

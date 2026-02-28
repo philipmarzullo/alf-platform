@@ -3,10 +3,10 @@ import MiniSparkline from './MiniSparkline';
 /**
  * Semantic stat card with colored left border + icon circle.
  *
- * color: 'amber' | 'emerald' | 'blue' | 'purple' | 'red' | 'gray'
+ * color: 'orange' | 'emerald' | 'blue' | 'purple' | 'red' | 'gray'
  */
 const COLOR_MAP = {
-  amber:   { border: 'border-l-amber-500',   iconBg: 'bg-amber-50',   iconText: 'text-amber-500',   sparkline: '#F59E0B' },
+  orange:  { border: 'border-l-alf-orange',   iconBg: 'bg-alf-orange/10',   iconText: 'text-alf-orange',   sparkline: '#C84B0A' },
   emerald: { border: 'border-l-emerald-500', iconBg: 'bg-emerald-50', iconText: 'text-emerald-500', sparkline: '#10B981' },
   blue:    { border: 'border-l-blue-500',     iconBg: 'bg-blue-50',     iconText: 'text-blue-500',     sparkline: '#3B82F6' },
   purple:  { border: 'border-l-purple-500',   iconBg: 'bg-purple-50',   iconText: 'text-purple-500',   sparkline: '#8B5CF6' },
@@ -14,8 +14,8 @@ const COLOR_MAP = {
   gray:    { border: 'border-l-gray-400',     iconBg: 'bg-gray-50',     iconText: 'text-gray-400',     sparkline: '#9CA3AF' },
 };
 
-export default function StatCard({ label, value, subtitle, icon: Icon, color = 'amber', sparkData }) {
-  const c = COLOR_MAP[color] || COLOR_MAP.amber;
+export default function StatCard({ label, value, subtitle, icon: Icon, color = 'orange', sparkData }) {
+  const c = COLOR_MAP[color] || COLOR_MAP.orange;
 
   return (
     <div className={`bg-white rounded-lg border border-gray-200 border-l-4 ${c.border} p-4`}>

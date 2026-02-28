@@ -6,8 +6,8 @@ export const BRAND = {
   lightBg: '#F5F5F5',
   white: '#FFFFFF',
   darkNav: '#1B2133',
-  darkNavWarm: '#231A12',
-  amber: '#F59E0B',
+  alfDark: '#1C1C1C',
+  alfOrange: '#C84B0A',
 };
 
 export const DEPT_COLORS = {
@@ -15,10 +15,10 @@ export const DEPT_COLORS = {
   finance: '#0D9488',
   purchasing: '#7C3AED',
   ops: '#4B5563',
-  sales: '#F59E0B',
+  sales: '#C84B0A',
   admin: '#E12F2C',
   tools: '#0284C7',
-  platform: '#F59E0B',
+  platform: '#C84B0A',
 };
 
 export const MODEL_OPTIONS = [

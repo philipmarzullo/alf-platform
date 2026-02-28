@@ -8,6 +8,7 @@ import {
   LayoutDashboard, Building2, Bot, Activity, Settings,
   Menu, X, LogOut, HardDrive,
 } from 'lucide-react';
+import AlfMark from '../shared/AlfMark';
 
 const ICON_MAP = {
   LayoutDashboard, Building2, Bot, Activity, Settings, HardDrive,
@@ -30,13 +31,13 @@ export default function Sidebar() {
   }
 
   const nav = (
-    <aside className={`fixed top-0 left-0 h-screen bg-dark-nav-warm flex flex-col z-40 transition-all duration-200 ${
+    <aside className={`fixed top-0 left-0 h-screen bg-alf-dark flex flex-col z-40 transition-all duration-200 ${
       isDesktop ? 'w-56' : 'w-64'
     }`}>
       {/* Logo */}
-      <div className="flex items-center gap-3 px-4 h-14 border-b border-white/10 shrink-0">
-        <img src="/alf-logo.jpg" alt="Alf" className="w-8 h-8 rounded-full" />
-        <span className="text-sm font-semibold text-white tracking-wide">Alf Platform</span>
+      <div className="flex items-center gap-2.5 px-4 h-14 border-b border-white/10 shrink-0">
+        <AlfMark size={28} />
+        <span className="text-lg text-white" style={{ fontFamily: 'Georgia, serif', letterSpacing: -1 }}>alf</span>
         {!isDesktop && (
           <button onClick={() => setMobileOpen(false)} className="ml-auto text-white/60 hover:text-white">
             <X size={20} />
@@ -67,7 +68,7 @@ export default function Sidebar() {
                     }`}
                   >
                     {active && (
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r bg-amber-500" />
+                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r bg-alf-orange" />
                     )}
                     <Icon size={18} />
                     <span>{item.label}</span>
@@ -82,7 +83,7 @@ export default function Sidebar() {
       {/* User footer */}
       <div className="border-t border-white/10 px-3 py-3 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold bg-amber-500/20 text-amber-400">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold bg-alf-orange/20 text-alf-orange">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
@@ -117,7 +118,7 @@ export default function Sidebar() {
       {/* Mobile hamburger */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="fixed top-3 left-3 z-50 p-2 rounded-lg bg-dark-nav-warm text-white md:hidden"
+        className="fixed top-3 left-3 z-50 p-2 rounded-lg bg-alf-dark text-white md:hidden"
       >
         <Menu size={20} />
       </button>

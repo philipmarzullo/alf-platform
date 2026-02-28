@@ -288,7 +288,7 @@ export default function PlatformTenantDetailPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <Loader2 size={24} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -297,7 +297,7 @@ export default function PlatformTenantDetailPage() {
     return (
       <div className="text-center py-24">
         <p className="text-secondary-text">Tenant not found.</p>
-        <button onClick={() => navigate('/platform/tenants')} className="text-sm text-amber-600 hover:underline mt-2">
+        <button onClick={() => navigate('/platform/tenants')} className="text-sm text-alf-orange hover:underline mt-2">
           Back to Tenants
         </button>
       </div>
@@ -326,7 +326,7 @@ export default function PlatformTenantDetailPage() {
                 onClick={() => setTab(tab.key)}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                   isActive
-                    ? 'border-amber-600 text-amber-600'
+                    ? 'border-alf-orange text-alf-orange'
                     : 'border-transparent text-secondary-text hover:text-dark-text hover:border-gray-300'
                 }`}
               >
@@ -499,13 +499,13 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
             <div
               key={mod.key}
               className={`bg-white rounded-lg border transition-colors ${
-                isEnabled ? 'border-amber-200' : 'border-gray-200'
+                isEnabled ? 'border-alf-orange/30' : 'border-gray-200'
               }`}
             >
               {/* Module header */}
               <div className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <Puzzle size={16} className={isEnabled ? 'text-amber-500' : 'text-gray-400'} />
+                  <Puzzle size={16} className={isEnabled ? 'text-alf-orange' : 'text-gray-400'} />
                   <div className="min-w-0">
                     <h3 className="text-sm font-semibold text-dark-text">{mod.label}</h3>
                     <p className="text-xs text-secondary-text">{mod.description}</p>
@@ -524,10 +524,10 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                   <button
                     onClick={() => onToggleModule(mod.key)}
                     disabled={savingModules}
-                    className="text-gray-500 hover:text-amber-600 transition-colors disabled:opacity-50"
+                    className="text-gray-500 hover:text-alf-orange transition-colors disabled:opacity-50"
                   >
                     {isEnabled
-                      ? <ToggleRight size={24} className="text-amber-600" />
+                      ? <ToggleRight size={24} className="text-alf-orange" />
                       : <ToggleLeft size={24} className="text-gray-400" />
                     }
                   </button>
@@ -564,7 +564,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                         <button
                           onClick={() => selectAll(mod.key, 'pages')}
                           disabled={savingModules}
-                          className="text-xs text-amber-600 hover:text-amber-700 disabled:opacity-50"
+                          className="text-xs text-alf-orange hover:text-alf-orange disabled:opacity-50"
                         >
                           All
                         </button>
@@ -584,7 +584,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                           <label
                             key={page.key}
                             className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${
-                              checked ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500'
+                              checked ? 'bg-alf-orange/10 text-alf-orange' : 'bg-gray-50 text-gray-500'
                             }`}
                           >
                             <input
@@ -592,7 +592,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                               checked={checked}
                               onChange={() => toggleCapability(mod.key, 'pages', page.key)}
                               disabled={savingModules}
-                              className="accent-amber-600"
+                              className="accent-alf-orange"
                             />
                             {page.label}
                           </label>
@@ -609,7 +609,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                         <button
                           onClick={() => selectAll(mod.key, 'actions')}
                           disabled={savingModules}
-                          className="text-xs text-amber-600 hover:text-amber-700 disabled:opacity-50"
+                          className="text-xs text-alf-orange hover:text-alf-orange disabled:opacity-50"
                         >
                           All
                         </button>
@@ -629,7 +629,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                           <label
                             key={action.key}
                             className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${
-                              checked ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500'
+                              checked ? 'bg-alf-orange/10 text-alf-orange' : 'bg-gray-50 text-gray-500'
                             }`}
                           >
                             <input
@@ -637,7 +637,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                               checked={checked}
                               onChange={() => toggleCapability(mod.key, 'actions', action.key)}
                               disabled={savingModules}
-                              className="accent-amber-600"
+                              className="accent-alf-orange"
                             />
                             {action.label}
                           </label>
@@ -700,7 +700,7 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
       <div>
         <h2 className="text-lg font-semibold text-dark-text">Agent Assignments</h2>
         <p className="text-sm text-secondary-text mt-1">
-          Toggle agents on/off for this tenant. Edit agent definitions on the <button onClick={() => navigate('/platform/agents')} className="text-amber-600 hover:underline">Agents page</button>.
+          Toggle agents on/off for this tenant. Edit agent definitions on the <button onClick={() => navigate('/platform/agents')} className="text-alf-orange hover:underline">Agents page</button>.
         </p>
       </div>
 
@@ -749,16 +749,16 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
                   {/* Custom prompt toggle */}
                   <button
                     onClick={() => setExpandedPrompt(hasCustomPrompt ? null : agent.key)}
-                    className="text-xs text-secondary-text hover:text-amber-600 transition-colors"
+                    className="text-xs text-secondary-text hover:text-alf-orange transition-colors"
                     title="Custom prompt additions"
                   >
-                    <FileText size={14} className={override?.custom_prompt_additions ? 'text-amber-500' : ''} />
+                    <FileText size={14} className={override?.custom_prompt_additions ? 'text-alf-orange' : ''} />
                   </button>
 
                   {/* Edit Agent link */}
                   <button
                     onClick={() => navigate(`/platform/agents/${agent.key}`)}
-                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                    className="text-xs text-alf-orange hover:text-alf-orange font-medium transition-colors"
                   >
                     Edit Agent
                   </button>
@@ -768,14 +768,14 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
                     <button
                       onClick={() => onToggleAgent(agent.key, override)}
                       disabled={savingOverride === agent.key}
-                      className="text-gray-500 hover:text-amber-600 transition-colors disabled:opacity-50"
+                      className="text-gray-500 hover:text-alf-orange transition-colors disabled:opacity-50"
                     >
                       {savingOverride === agent.key ? (
-                        <Loader2 size={20} className="animate-spin text-amber-500" />
+                        <Loader2 size={20} className="animate-spin text-alf-orange" />
                       ) : (override && !override.is_enabled) ? (
                         <ToggleLeft size={24} className="text-gray-400" />
                       ) : (
-                        <ToggleRight size={24} className="text-amber-600" />
+                        <ToggleRight size={24} className="text-alf-orange" />
                       )}
                     </button>
                   )}
@@ -786,20 +786,20 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
               {hasCustomPrompt && (
                 <div className="border-t border-gray-100 px-4 py-3 bg-gray-50/50 space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <FileText size={14} className="text-amber-500" />
-                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Custom Prompt Addition</span>
+                    <FileText size={14} className="text-alf-orange" />
+                    <span className="text-xs font-semibold text-alf-orange uppercase tracking-wider">Custom Prompt Addition</span>
                   </div>
                   <textarea
                     value={customPrompts[agent.key] || ''}
                     onChange={(e) => setCustomPrompts((prev) => ({ ...prev, [agent.key]: e.target.value }))}
                     rows={3}
-                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 resize-y"
+                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange resize-y"
                     placeholder="Additional instructions appended to this agent's system prompt for this tenant..."
                   />
                   <button
                     onClick={() => handleSaveCustomPrompt(agent.key)}
                     disabled={savingPrompt === agent.key}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-alf-orange text-white text-xs font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
                   >
                     {savingPrompt === agent.key ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                     Save Custom Prompt
@@ -861,7 +861,7 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
         <button
           onClick={onSave}
           disabled={saving}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           {saving ? 'Saving...' : 'Save Brand'}
@@ -881,7 +881,7 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
               value={editBrand.brand_display_name}
               onChange={(e) => update('brand_display_name', e.target.value)}
               placeholder="e.g., A&A Portal"
-              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
             />
           </div>
         </div>
@@ -925,7 +925,7 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
               type="button"
               onClick={() => logoInputRef.current?.click()}
               disabled={uploading}
-              className="w-full border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-amber-400 hover:bg-amber-50/30 transition-colors disabled:opacity-50"
+              className="w-full border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-alf-orange/50 hover:bg-alf-orange/5 transition-colors disabled:opacity-50"
             >
               {uploading ? (
                 <div className="flex items-center justify-center gap-2 text-sm text-secondary-text">
@@ -948,7 +948,7 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
                 value={editBrand.brand_logo_url}
                 onChange={(e) => update('brand_logo_url', e.target.value)}
                 placeholder="https://example.com/logo.png"
-                className="flex-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="flex-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               />
             </div>
           </div>
@@ -971,7 +971,7 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
               type="text"
               value={editBrand.brand_primary_color}
               onChange={(e) => update('brand_primary_color', e.target.value)}
-              className="w-32 px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-32 px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               placeholder="#009ADE"
             />
           </div>
@@ -994,7 +994,7 @@ function BrandTab({ editBrand, setEditBrand, saving, onSave, tenantId }) {
               type="text"
               value={editBrand.brand_sidebar_bg}
               onChange={(e) => update('brand_sidebar_bg', e.target.value)}
-              className="w-32 px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-32 px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               placeholder="#1B2133"
             />
           </div>
@@ -1146,7 +1146,7 @@ function ApiKeysTab({ tenantId }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 size={20} className="text-amber-500 animate-spin" />
+        <Loader2 size={20} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -1236,7 +1236,7 @@ function ApiKeysTab({ tenantId }) {
                         value={formKey}
                         onChange={(e) => setFormKey(e.target.value)}
                         placeholder={svc.placeholder}
-                        className="w-full px-3 py-2 pr-10 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                        className="w-full px-3 py-2 pr-10 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                         autoComplete="off"
                       />
                       <button
@@ -1255,14 +1255,14 @@ function ApiKeysTab({ tenantId }) {
                       value={formLabel}
                       onChange={(e) => setFormLabel(e.target.value)}
                       placeholder="e.g., Production Key"
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                     />
                   </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleSave(svc.key)}
                       disabled={saving || !formKey.trim()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
                     >
                       {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                       Save Key
@@ -1282,7 +1282,7 @@ function ApiKeysTab({ tenantId }) {
                 {!isEditing && (
                   <button
                     onClick={() => startEdit(svc.key)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-alf-orange border border-alf-orange/30 rounded-lg hover:bg-alf-orange/10 transition-colors"
                   >
                     <Key size={14} />
                     {cred ? 'Replace Key' : 'Add Key'}
@@ -1369,7 +1369,7 @@ const FILE_TYPE_BADGE = {
 };
 
 const DOC_TYPE_BADGE = {
-  sop: 'bg-amber-50 text-amber-700',
+  sop: 'bg-alf-orange/10 text-alf-orange',
   policy: 'bg-purple-50 text-purple-700',
   reference: 'bg-green-50 text-green-700',
   template: 'bg-cyan-50 text-cyan-700',
@@ -1546,7 +1546,7 @@ function KnowledgeTab({ tenantId }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 size={20} className="text-amber-500 animate-spin" />
+        <Loader2 size={20} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -1598,7 +1598,7 @@ function KnowledgeTab({ tenantId }) {
           <select
             value={uploadDept}
             onChange={(e) => setUploadDept(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 bg-white"
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange bg-white"
           >
             {DEPARTMENTS.filter((d) => d.key !== 'all').map((d) => (
               <option key={d.key} value={d.key}>{d.label}</option>
@@ -1607,7 +1607,7 @@ function KnowledgeTab({ tenantId }) {
           <select
             value={uploadDocType}
             onChange={(e) => setUploadDocType(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 bg-white"
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange bg-white"
           >
             {DOC_TYPES.map((t) => (
               <option key={t.key} value={t.key}>{t.label}</option>
@@ -1622,13 +1622,13 @@ function KnowledgeTab({ tenantId }) {
           onClick={() => fileInputRef.current?.click()}
           className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
             dragOver
-              ? 'border-amber-400 bg-amber-50'
-              : 'border-gray-300 hover:border-amber-300 hover:bg-gray-50'
+              ? 'border-alf-orange/50 bg-alf-orange/10'
+              : 'border-gray-300 hover:border-alf-orange/40 hover:bg-gray-50'
           } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
         >
           {uploading ? (
             <div className="flex flex-col items-center gap-2">
-              <Loader2 size={24} className="text-amber-500 animate-spin" />
+              <Loader2 size={24} className="text-alf-orange animate-spin" />
               <span className="text-sm text-secondary-text">Extracting text and uploading...</span>
             </div>
           ) : (
@@ -1662,7 +1662,7 @@ function KnowledgeTab({ tenantId }) {
                 onClick={() => setFilterDept(dept.key)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
                   isActive
-                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                    ? 'bg-alf-orange/15 text-alf-orange border border-alf-orange/40'
                     : 'bg-gray-100 text-gray-600 border border-transparent hover:bg-gray-200'
                 }`}
               >
@@ -1725,7 +1725,7 @@ function KnowledgeTab({ tenantId }) {
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       onClick={() => setExpandedDoc(isExpanded ? null : doc.id)}
-                      className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+                      className="p-1 text-gray-400 hover:text-alf-orange transition-colors"
                       title={isExpanded ? 'Collapse preview' : 'Preview extracted text'}
                     >
                       {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -1805,7 +1805,7 @@ function DocumentTextPreview({ docId }) {
   if (loading) {
     return (
       <div className="border-t border-gray-100 px-4 py-4 flex items-center justify-center">
-        <Loader2 size={16} className="text-amber-500 animate-spin" />
+        <Loader2 size={16} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -1852,13 +1852,13 @@ const AUTOMATION_DEPARTMENTS = [
 
 const PRIORITY_BADGE = {
   'quick-win': 'bg-green-50 text-green-700',
-  'medium-term': 'bg-amber-50 text-amber-700',
+  'medium-term': 'bg-alf-orange/10 text-alf-orange',
   'long-term': 'bg-purple-50 text-purple-700',
 };
 
 const EFFORT_BADGE = {
   low: 'bg-green-50 text-green-700',
-  medium: 'bg-amber-50 text-amber-700',
+  medium: 'bg-alf-orange/10 text-alf-orange',
   high: 'bg-red-50 text-red-700',
 };
 
@@ -2126,7 +2126,7 @@ function AutomationTab({ tenantId }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 size={20} className="text-amber-500 animate-spin" />
+        <Loader2 size={20} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -2171,7 +2171,7 @@ function AutomationTab({ tenantId }) {
               onClick={() => setFilterDept(dept.key)}
               className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
                 isActive
-                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  ? 'bg-alf-orange/15 text-alf-orange border border-alf-orange/40'
                   : 'bg-gray-100 text-gray-600 border border-transparent hover:bg-gray-200'
               }`}
             >
@@ -2187,7 +2187,7 @@ function AutomationTab({ tenantId }) {
           <button
             onClick={() => handleAnalyze(filtered.map(d => d.id))}
             disabled={analyzingIds.size > 0}
-            className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {analyzingIds.size > 0 ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
             Analyze All ({filtered.length})
@@ -2227,7 +2227,7 @@ function AutomationTab({ tenantId }) {
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{doc.department}</span>
                         {analysis?.status === 'completed' && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-alf-orange/10 text-alf-orange">
                             Score: {analysis.analysis?.automation_score}/100
                           </span>
                         )}
@@ -2287,7 +2287,7 @@ function AutomationTab({ tenantId }) {
               <button
                 onClick={() => handleGenerateRoadmap(filterDept)}
                 disabled={generatingRoadmap}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-alf-orange text-white hover:bg-alf-orange/90 transition-colors disabled:opacity-50 flex items-center gap-1"
               >
                 {generatingRoadmap ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                 {activeRoadmap ? 'Regenerate Roadmap' : 'Generate Roadmap'}
@@ -2311,7 +2311,7 @@ function AutomationTab({ tenantId }) {
                 <button
                   onClick={() => handleConvertToActions(activeRoadmap.id)}
                   disabled={convertingActions}
-                  className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
                   {convertingActions ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                   Convert to Actions
@@ -2352,7 +2352,7 @@ const ASSIGNEE_BADGE = {
 
 const STATUS_BADGE = {
   planned: 'bg-gray-100 text-gray-600',
-  skill_generating: 'bg-amber-50 text-amber-700',
+  skill_generating: 'bg-alf-orange/10 text-alf-orange',
   ready_for_review: 'bg-blue-50 text-blue-700',
   active: 'bg-green-50 text-green-700',
   manual: 'bg-gray-100 text-gray-600',
@@ -2381,7 +2381,7 @@ function ActionsSection({
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Zap size={16} className="text-amber-500" />
+          <Zap size={16} className="text-alf-orange" />
           <span className="text-sm font-medium text-dark-text">Automation Actions</span>
           <span className="text-xs text-secondary-text">({actions.length})</span>
         </div>
@@ -2390,7 +2390,7 @@ function ActionsSection({
             <button
               onClick={onGenerateAllSkills}
               disabled={generatingAllSkills}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-alf-orange text-white hover:bg-alf-orange/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             >
               {generatingAllSkills ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
               Generate All Skills ({plannedAgentCount})
@@ -2441,7 +2441,7 @@ function ActionsSection({
                         {action.status.replace(/_/g, ' ')}
                       </span>
                       {action.agent_key && (
-                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-alf-orange/10 text-alf-orange">
                           {action.agent_key}
                         </span>
                       )}
@@ -2481,7 +2481,7 @@ function ActionsSection({
                       <button
                         onClick={() => onGenerateSkill(action.id)}
                         disabled={generatingSkillId === action.id}
-                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center gap-1"
+                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-alf-orange/40 text-alf-orange hover:bg-alf-orange/10 transition-colors disabled:opacity-50 flex items-center gap-1"
                       >
                         {generatingSkillId === action.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                         Generate Skill
@@ -2536,7 +2536,7 @@ function AnalysisDetail({ analysis }) {
           <span className="text-xs text-secondary-text">Readiness: </span>
           <span className={`text-xs px-2 py-0.5 rounded-full ${
             analysis.automation_readiness === 'high' ? 'bg-green-50 text-green-700' :
-            analysis.automation_readiness === 'medium' ? 'bg-amber-50 text-amber-700' :
+            analysis.automation_readiness === 'medium' ? 'bg-alf-orange/10 text-alf-orange' :
             'bg-red-50 text-red-700'
           }`}>
             {analysis.automation_readiness}
@@ -2654,7 +2654,7 @@ function RoadmapDetail({ roadmap }) {
           <div className="text-xs font-semibold text-dark-text mb-2 flex items-center gap-2">
             <span className={`w-2 h-2 rounded-full ${
               phase.phase === 'quick-wins' ? 'bg-green-500' :
-              phase.phase === 'medium-term' ? 'bg-amber-500' : 'bg-purple-500'
+              phase.phase === 'medium-term' ? 'bg-alf-orange' : 'bg-purple-500'
             }`} />
             {phase.label}
           </div>
@@ -2708,9 +2708,9 @@ function RoadmapDetail({ roadmap }) {
 
       {/* Recommended First Action */}
       {roadmap.recommended_first_action && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <div className="text-xs font-semibold text-amber-800 mb-1">Recommended First Action</div>
-          <div className="text-sm text-amber-900">{roadmap.recommended_first_action}</div>
+        <div className="bg-alf-orange/10 border border-alf-orange/30 rounded-lg p-3">
+          <div className="text-xs font-semibold text-alf-orange mb-1">Recommended First Action</div>
+          <div className="text-sm text-alf-orange">{roadmap.recommended_first_action}</div>
         </div>
       )}
     </div>
@@ -3037,7 +3037,7 @@ function DashboardsTab({ tenantId }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 size={20} className="text-amber-500 animate-spin" />
+        <Loader2 size={20} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -3058,7 +3058,7 @@ function DashboardsTab({ tenantId }) {
           {!showTemplateForm && (
             <button
               onClick={() => { resetRtForm(); setShowTemplateForm(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-alf-orange border border-alf-orange/30 rounded-lg hover:bg-alf-orange/10 transition-colors"
             >
               <Plus size={14} />
               Add Template
@@ -3068,7 +3068,7 @@ function DashboardsTab({ tenantId }) {
 
         {/* Inline form */}
         {showTemplateForm && (
-          <div className="bg-white rounded-lg border border-amber-200 p-4 mb-4 space-y-4">
+          <div className="bg-white rounded-lg border border-alf-orange/30 p-4 mb-4 space-y-4">
             <h3 className="text-sm font-semibold text-dark-text">
               {editingTemplate ? 'Edit Template' : 'New Template'}
             </h3>
@@ -3080,7 +3080,7 @@ function DashboardsTab({ tenantId }) {
                   value={rtForm.name}
                   onChange={(e) => setRtForm((prev) => ({ ...prev, name: e.target.value }))}
                   placeholder="e.g., Site Manager"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                 />
               </div>
               <div>
@@ -3090,7 +3090,7 @@ function DashboardsTab({ tenantId }) {
                   value={rtForm.description}
                   onChange={(e) => setRtForm((prev) => ({ ...prev, description: e.target.value }))}
                   placeholder="Optional description"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                 />
               </div>
             </div>
@@ -3104,7 +3104,7 @@ function DashboardsTab({ tenantId }) {
                     key={tier}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border transition-colors ${
                       rtForm.metric_tier === tier
-                        ? 'border-amber-300 bg-amber-50 text-amber-800'
+                        ? 'border-alf-orange/40 bg-alf-orange/10 text-alf-orange'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
                     }`}
                   >
@@ -3114,7 +3114,7 @@ function DashboardsTab({ tenantId }) {
                       value={tier}
                       checked={rtForm.metric_tier === tier}
                       onChange={(e) => setRtForm((prev) => ({ ...prev, metric_tier: e.target.value }))}
-                      className="accent-amber-600"
+                      className="accent-alf-orange"
                     />
                     <span className="capitalize">{tier}</span>
                   </label>
@@ -3133,7 +3133,7 @@ function DashboardsTab({ tenantId }) {
                       key={domain}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border transition-colors ${
                         checked
-                          ? 'border-amber-300 bg-amber-50 text-amber-800'
+                          ? 'border-alf-orange/40 bg-alf-orange/10 text-alf-orange'
                           : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
                       }`}
                     >
@@ -3141,7 +3141,7 @@ function DashboardsTab({ tenantId }) {
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleRtDomain(domain)}
-                        className="accent-amber-600"
+                        className="accent-alf-orange"
                       />
                       <span className="capitalize">{domain}</span>
                     </label>
@@ -3156,7 +3156,7 @@ function DashboardsTab({ tenantId }) {
                 type="checkbox"
                 checked={rtForm.is_default}
                 onChange={(e) => setRtForm((prev) => ({ ...prev, is_default: e.target.checked }))}
-                className="accent-amber-600"
+                className="accent-alf-orange"
               />
               Set as default template for new users
             </label>
@@ -3166,7 +3166,7 @@ function DashboardsTab({ tenantId }) {
               <button
                 onClick={handleSaveTemplate}
                 disabled={rtSaving || !rtForm.name.trim()}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
               >
                 {rtSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 {editingTemplate ? 'Update' : 'Create'}
@@ -3184,7 +3184,7 @@ function DashboardsTab({ tenantId }) {
         {/* Template cards */}
         {rtLoading ? (
           <div className="flex items-center justify-center py-6">
-            <Loader2 size={18} className="text-amber-500 animate-spin" />
+            <Loader2 size={18} className="text-alf-orange animate-spin" />
           </div>
         ) : roleTemplates.length === 0 ? (
           <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-sm text-secondary-text">
@@ -3198,7 +3198,7 @@ function DashboardsTab({ tenantId }) {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-dark-text">{tmpl.name}</span>
                     {tmpl.is_default && (
-                      <Star size={14} className="text-amber-500 fill-amber-500" />
+                      <Star size={14} className="text-alf-orange fill-alf-orange" />
                     )}
                   </div>
                   <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full capitalize ${TIER_BADGE[tmpl.metric_tier] || 'bg-gray-100 text-gray-600'}`}>
@@ -3221,7 +3221,7 @@ function DashboardsTab({ tenantId }) {
                 <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
                   <button
                     onClick={() => startEditTemplate(tmpl)}
-                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                    className="text-xs text-alf-orange hover:text-alf-orange font-medium transition-colors"
                   >
                     Edit
                   </button>
@@ -3287,7 +3287,7 @@ function DashboardsTab({ tenantId }) {
             <select
               value={selectedTemplate}
               onChange={(e) => setSelectedTemplate(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
             >
               <option value="">Select a template...</option>
               {TEMPLATE_KEYS.map((key) => (
@@ -3300,7 +3300,7 @@ function DashboardsTab({ tenantId }) {
           <button
             onClick={handleApplyTemplate}
             disabled={!selectedTemplate || applying}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-alf-orange rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
           >
             {applying && <Loader2 size={14} className="animate-spin" />}
             Apply
@@ -3320,7 +3320,7 @@ function DashboardsTab({ tenantId }) {
           <button
             onClick={handleGetRecommendations}
             disabled={recommending}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-alf-orange rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
           >
             {recommending ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
             {recommending ? 'Analyzing...' : 'Get Recommendations'}
@@ -3330,8 +3330,8 @@ function DashboardsTab({ tenantId }) {
         {recommendations && recommendations.length > 0 && (
           <div className="space-y-3 mt-4">
             {recSummary && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-sm text-amber-900">{recSummary}</p>
+              <div className="bg-alf-orange/10 border border-alf-orange/30 rounded-lg p-3">
+                <p className="text-sm text-alf-orange">{recSummary}</p>
               </div>
             )}
 
@@ -3353,7 +3353,7 @@ function DashboardsTab({ tenantId }) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-semibold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] font-semibold uppercase text-alf-orange bg-alf-orange/10 px-1.5 py-0.5 rounded">
                         {rec.dashboard}
                       </span>
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
@@ -3397,14 +3397,14 @@ function DashboardsTab({ tenantId }) {
                 </button>
                 <button
                   onClick={() => setAcceptedRecs(new Set(recommendations.map((_, i) => i)))}
-                  className="px-3 py-1.5 text-xs font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+                  className="px-3 py-1.5 text-xs font-medium text-alf-orange border border-alf-orange/30 rounded-lg hover:bg-alf-orange/10 transition-colors"
                 >
                   Select All
                 </button>
                 <button
                   onClick={handleApplyAccepted}
                   disabled={acceptedRecs.size === 0 || applyingRecs}
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-alf-orange rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
                 >
                   {applyingRecs && <Loader2 size={12} className="animate-spin" />}
                   Apply Selected
@@ -3431,11 +3431,11 @@ function DashboardsTab({ tenantId }) {
             <div key={key} className="bg-white rounded-lg border border-gray-200">
               <div className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3">
-                  <BarChart3 size={16} className={config ? 'text-amber-500' : 'text-gray-300'} />
+                  <BarChart3 size={16} className={config ? 'text-alf-orange' : 'text-gray-300'} />
                   <div>
                     <span className="text-sm font-medium text-dark-text capitalize">{key}</span>
                     {config ? (
-                      <span className="ml-2 text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                      <span className="ml-2 text-[10px] font-medium text-alf-orange bg-alf-orange/10 px-1.5 py-0.5 rounded">
                         Configured
                       </span>
                     ) : (
@@ -3463,7 +3463,7 @@ function DashboardsTab({ tenantId }) {
                   )}
                   <button
                     onClick={() => isEditing ? setEditKey(null) : startEdit(key)}
-                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                    className="text-xs text-alf-orange hover:text-alf-orange font-medium transition-colors"
                   >
                     {isEditing ? 'Cancel' : 'Edit JSON'}
                   </button>
@@ -3476,14 +3476,14 @@ function DashboardsTab({ tenantId }) {
                     value={editDraft}
                     onChange={(e) => setEditDraft(e.target.value)}
                     rows={12}
-                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 resize-y"
+                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange resize-y"
                     spellCheck={false}
                   />
                   <div className="flex justify-end">
                     <button
                       onClick={handleSaveEdit}
                       disabled={saving}
-                      className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-alf-orange rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
                     >
                       {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                       Save
@@ -3677,7 +3677,7 @@ function BackupTab({ tenantId, tenantSlug }) {
             <button
               onClick={handleSave}
               disabled={saving || downloading || loadingSummary}
-              className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2 px-4 py-2.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {saving ? (
                 <><Loader2 size={16} className="animate-spin" /> Saving...</>
@@ -3781,11 +3781,11 @@ function BackupTab({ tenantId, tenantSlug }) {
       )}
 
       {/* Exclusions Notice */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
-        <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
-        <div className="text-sm text-amber-800">
+      <div className="bg-alf-orange/10 border border-alf-orange/30 rounded-lg p-4 flex gap-3">
+        <AlertTriangle size={18} className="text-alf-orange shrink-0 mt-0.5" />
+        <div className="text-sm text-alf-orange">
           <p className="font-medium mb-1">Excluded from export</p>
-          <ul className="list-disc list-inside space-y-0.5 text-amber-700">
+          <ul className="list-disc list-inside space-y-0.5 text-alf-orange">
             <li><strong>API credentials</strong> — encrypted keys are never exported for security</li>
             <li><strong>Snowflake sync data</strong> (sf_* tables) — source of truth is external</li>
             <li><strong>Usage logs</strong> — platform telemetry, not tenant-owned</li>
@@ -3836,7 +3836,7 @@ function CustomToolsTab({ tenantId }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 size={20} className="text-amber-500 animate-spin" />
+        <Loader2 size={20} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -3862,8 +3862,8 @@ function CustomToolsTab({ tenantId }) {
             <div key={tool.id} className={`bg-white rounded-lg border border-gray-200 p-4 ${!tool.is_active ? 'opacity-60' : ''}`}>
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
-                    <Wrench size={14} className="text-amber-600" />
+                  <div className="w-8 h-8 rounded-lg bg-alf-orange/10 flex items-center justify-center shrink-0">
+                    <Wrench size={14} className="text-alf-orange" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">

@@ -100,7 +100,7 @@ export default function PlatformBackupsPage() {
       render: (v) => (
         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
           v === 'platform'
-            ? 'bg-amber-100 text-amber-800'
+            ? 'bg-alf-orange/15 text-alf-orange'
             : 'bg-blue-100 text-blue-800'
         }`}>
           {v}
@@ -187,7 +187,7 @@ export default function PlatformBackupsPage() {
           <button
             onClick={handlePlatformExport}
             disabled={exporting}
-            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+            className="flex items-center gap-2 px-5 py-2.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
           >
             {exporting ? (
               <>
@@ -233,9 +233,9 @@ export default function PlatformBackupsPage() {
         )}
 
         {/* Exclusions */}
-        <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
-          <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-          <div className="text-xs text-amber-800">
+        <div className="mt-4 bg-alf-orange/10 border border-alf-orange/30 rounded-lg p-4 flex gap-3">
+          <AlertTriangle size={16} className="text-alf-orange shrink-0 mt-0.5" />
+          <div className="text-xs text-alf-orange">
             <span className="font-medium">Excluded:</span> API credentials (encrypted keys), Snowflake sync tables (sf_*), generated PPTX decks
           </div>
         </div>

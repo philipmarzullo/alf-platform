@@ -15,7 +15,7 @@ export default function PlatformTenantsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <Loader2 size={24} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -54,7 +54,7 @@ export default function PlatformTenantsPage() {
           </div>
           <button
             onClick={() => navigate('/platform/tenants/new')}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 transition-colors"
           >
             <Plus size={16} />
             New Tenant

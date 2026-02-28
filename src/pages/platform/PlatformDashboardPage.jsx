@@ -27,7 +27,7 @@ export default function PlatformDashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <Loader2 size={24} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -58,7 +58,7 @@ export default function PlatformDashboardPage() {
           value={tenants.filter((t) => t.status === 'active').length}
           subtitle={`${tenants.length} total`}
           icon={Building2}
-          color="amber"
+          color="orange"
         />
         <StatCard
           label="Total Users"

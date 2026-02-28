@@ -25,7 +25,7 @@ export default function TenantCard({ tenant, onClick }) {
   return (
     <button
       onClick={() => onClick?.(tenant)}
-      className="bg-white rounded-lg border border-gray-200 p-4 text-left hover:border-amber-300 hover:shadow-sm transition-all w-full"
+      className="bg-white rounded-lg border border-gray-200 p-4 text-left hover:border-alf-orange/40 hover:shadow-sm transition-all w-full"
     >
       {/* Header: name, health dot, tier badge */}
       <div className="flex items-start justify-between gap-2 mb-3">

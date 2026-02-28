@@ -307,7 +307,7 @@ export default function TenantOverviewTab({
   const ROLE_OPTIONS = ['user', 'manager', 'admin', 'super-admin'];
 
   const ROLE_STYLES = {
-    'platform_owner': 'bg-amber-50 text-amber-700 border-amber-200',
+    'platform_owner': 'bg-alf-orange/10 text-alf-orange border-alf-orange/30',
     'super-admin': 'bg-purple-50 text-purple-700 border-purple-200',
     'admin': 'bg-purple-50 text-purple-700 border-purple-200',
     'manager': 'bg-blue-50 text-blue-700 border-blue-200',
@@ -321,7 +321,7 @@ export default function TenantOverviewTab({
       key: 'role', label: 'Role',
       render: (val, row) => {
         if (val === 'platform_owner') {
-          return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">platform_owner</span>;
+          return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-alf-orange/10 text-alf-orange">platform_owner</span>;
         }
         return (
           <div className="relative inline-flex items-center">
@@ -329,7 +329,7 @@ export default function TenantOverviewTab({
               value={val}
               onChange={(e) => handleRoleChange(row.id, e.target.value)}
               disabled={roleUpdating === row.id}
-              className={`text-xs font-medium rounded-full pl-2.5 pr-6 py-1 border appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50 ${ROLE_STYLES[val] || ROLE_STYLES.user}`}
+              className={`text-xs font-medium rounded-full pl-2.5 pr-6 py-1 border appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-alf-orange/40 disabled:opacity-50 ${ROLE_STYLES[val] || ROLE_STYLES.user}`}
             >
               {ROLE_OPTIONS.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -358,7 +358,7 @@ export default function TenantOverviewTab({
             <button
               onClick={(e) => { e.stopPropagation(); openConfigModal(row); }}
               title="Configure template & site assignments"
-              className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+              className="p-1 text-gray-400 hover:text-alf-orange transition-colors"
             >
               <Settings2 size={14} />
             </button>
@@ -367,7 +367,7 @@ export default function TenantOverviewTab({
             onClick={(e) => { e.stopPropagation(); handleResetPassword(row.email); }}
             disabled={userActionLoading === row.email}
             title="Send password reset email"
-            className="p-1 text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50"
+            className="p-1 text-gray-400 hover:text-alf-orange transition-colors disabled:opacity-50"
           >
             {userActionLoading === row.email ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
           </button>
@@ -404,7 +404,7 @@ export default function TenantOverviewTab({
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               />
             </div>
             <div>
@@ -412,7 +412,7 @@ export default function TenantOverviewTab({
               <select
                 value={editPlan}
                 onChange={(e) => setEditPlan(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               >
                 {TIER_KEYS.map((key) => (
                   <option key={key} value={key}>{TIER_REGISTRY[key].label}</option>
@@ -424,7 +424,7 @@ export default function TenantOverviewTab({
               <select
                 value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -435,7 +435,7 @@ export default function TenantOverviewTab({
           <button
             onClick={onSave}
             disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors shrink-0"
+            className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors shrink-0"
           >
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
             Save
@@ -486,7 +486,7 @@ export default function TenantOverviewTab({
           label="Sites"
           value={sites.length}
           icon={MapPin}
-          color="amber"
+          color="orange"
         />
         <StatCard
           label="Agent Calls"
@@ -538,7 +538,7 @@ export default function TenantOverviewTab({
           <h2 className="text-sm font-semibold text-dark-text">Users ({localUsers.length})</h2>
           <button
             onClick={() => setShowAddUser(!showAddUser)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-alf-orange border border-alf-orange/30 rounded-lg hover:bg-alf-orange/10 transition-colors"
           >
             <Plus size={14} />
             Add User
@@ -546,7 +546,7 @@ export default function TenantOverviewTab({
         </div>
 
         {showAddUser && (
-          <div className="bg-white rounded-lg border border-amber-200 p-4 mb-3 space-y-3">
+          <div className="bg-white rounded-lg border border-alf-orange/30 p-4 mb-3 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs font-medium text-secondary-text mb-1">Name</label>
@@ -554,7 +554,7 @@ export default function TenantOverviewTab({
                   type="text"
                   value={newUserForm.name}
                   onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                   placeholder="Full name"
                 />
               </div>
@@ -564,7 +564,7 @@ export default function TenantOverviewTab({
                   type="email"
                   value={newUserForm.email}
                   onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                   placeholder="email@company.com"
                 />
               </div>
@@ -574,7 +574,7 @@ export default function TenantOverviewTab({
                   type="password"
                   value={newUserForm.password}
                   onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                   placeholder="Min 6 characters"
                   autoComplete="new-password"
                 />
@@ -584,7 +584,7 @@ export default function TenantOverviewTab({
                 <select
                   value={newUserForm.role}
                   onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                 >
                   <option value="user">User</option>
                   <option value="manager">Manager</option>
@@ -597,7 +597,7 @@ export default function TenantOverviewTab({
               <button
                 onClick={handleCreateUser}
                 disabled={creatingUser || !newUserForm.name.trim() || !newUserForm.email.trim() || newUserForm.password.length < 6}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
               >
                 {creatingUser ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                 Create User
@@ -656,7 +656,7 @@ export default function TenantOverviewTab({
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
               {configLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 size={20} className="text-amber-500 animate-spin" />
+                  <Loader2 size={20} className="text-alf-orange animate-spin" />
                 </div>
               ) : (
                 <>
@@ -668,7 +668,7 @@ export default function TenantOverviewTab({
                     <select
                       value={configSelectedTemplate}
                       onChange={(e) => setConfigSelectedTemplate(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                     >
                       <option value="">No template (full access)</option>
                       {configTemplates.map((t) => (
@@ -706,14 +706,14 @@ export default function TenantOverviewTab({
                             <label
                               key={job.id}
                               className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${
-                                checked ? 'bg-amber-50 text-amber-800' : 'hover:bg-gray-50 text-gray-600'
+                                checked ? 'bg-alf-orange/10 text-alf-orange' : 'hover:bg-gray-50 text-gray-600'
                               }`}
                             >
                               <input
                                 type="checkbox"
                                 checked={checked}
                                 onChange={() => toggleSiteAssignment(job.id)}
-                                className="accent-amber-600"
+                                className="accent-alf-orange"
                               />
                               <span className="font-medium">{job.job_name}</span>
                               {job.location && (
@@ -744,7 +744,7 @@ export default function TenantOverviewTab({
               <button
                 onClick={saveUserConfig}
                 disabled={configSaving || configLoading}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
               >
                 {configSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 Save

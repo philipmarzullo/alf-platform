@@ -100,7 +100,7 @@ function ConfigSection() {
         <button
           onClick={handleSave}
           disabled={saving || loading}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           {saving ? 'Saving...' : 'Save Config'}
@@ -112,7 +112,7 @@ function ConfigSection() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 size={20} className="text-amber-500 animate-spin" />
+          <Loader2 size={20} className="text-alf-orange animate-spin" />
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
@@ -120,7 +120,7 @@ function ConfigSection() {
             <select
               value={config.default_model}
               onChange={(e) => setConfig({ ...config, default_model: e.target.value })}
-              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
             >
               {MODEL_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
@@ -135,7 +135,7 @@ function ConfigSection() {
               onChange={(e) => setConfig({ ...config, max_tokens: parseInt(e.target.value) || 0 })}
               min={256}
               max={32768}
-              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
             />
           </ConfigRow>
 
@@ -146,7 +146,7 @@ function ConfigSection() {
               onChange={(e) => setConfig({ ...config, rate_limit_per_minute: parseInt(e.target.value) || 0 })}
               min={1}
               max={100}
-              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
             />
           </ConfigRow>
         </div>
@@ -288,7 +288,7 @@ function PlatformApiKeySection() {
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
-          <Loader2 size={20} className="text-amber-500 animate-spin" />
+          <Loader2 size={20} className="text-alf-orange animate-spin" />
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
@@ -328,7 +328,7 @@ function PlatformApiKeySection() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => { setEditing(!editing); setTestResult(null); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-alf-orange border border-alf-orange/30 rounded-lg hover:bg-alf-orange/10 transition-colors"
             >
               <Key size={14} />
               {credential ? 'Update Key' : 'Set Key'}
@@ -383,7 +383,7 @@ function PlatformApiKeySection() {
                     type={showKey ? 'text' : 'password'}
                     value={formKey}
                     onChange={(e) => setFormKey(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 pr-10 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                     placeholder="sk-ant-..."
                     autoComplete="off"
                   />
@@ -400,7 +400,7 @@ function PlatformApiKeySection() {
                 <button
                   onClick={handleSave}
                   disabled={saving || !formKey.trim()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   Save Key
@@ -546,7 +546,7 @@ function PlatformUsersSection() {
       key: 'role', label: 'Role',
       render: (val) => {
         const styles = val === 'platform_owner'
-          ? 'bg-amber-50 text-amber-700'
+          ? 'bg-alf-orange/10 text-alf-orange'
           : 'bg-purple-50 text-purple-700';
         return <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${styles}`}>{val.replace('_', ' ')}</span>;
       },
@@ -567,7 +567,7 @@ function PlatformUsersSection() {
             onClick={(e) => { e.stopPropagation(); handleResetPassword(row.email); }}
             disabled={actionLoading === row.email}
             title="Send password reset email"
-            className="p-1 text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50"
+            className="p-1 text-gray-400 hover:text-alf-orange transition-colors disabled:opacity-50"
           >
             {actionLoading === row.email ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
           </button>
@@ -593,7 +593,7 @@ function PlatformUsersSection() {
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-alf-orange border border-alf-orange/30 rounded-lg hover:bg-alf-orange/10 transition-colors"
         >
           <Plus size={14} />
           Add User
@@ -604,7 +604,7 @@ function PlatformUsersSection() {
       {success && <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg mb-3">{success}</div>}
 
       {showForm && (
-        <div className="bg-white rounded-lg border border-amber-200 p-4 mb-4 space-y-3">
+        <div className="bg-white rounded-lg border border-alf-orange/30 p-4 mb-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium text-secondary-text mb-1">Name</label>
@@ -612,7 +612,7 @@ function PlatformUsersSection() {
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                 placeholder="Full name"
               />
             </div>
@@ -622,7 +622,7 @@ function PlatformUsersSection() {
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                 placeholder="email@company.com"
               />
             </div>
@@ -633,7 +633,7 @@ function PlatformUsersSection() {
                   type={showPassword ? 'text' : 'password'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
                   placeholder="Min 6 characters"
                   autoComplete="new-password"
                 />
@@ -651,7 +651,7 @@ function PlatformUsersSection() {
               <select
                 value={form.role}
                 onChange={(e) => setForm({ ...form, role: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               >
                 <option value="platform_owner">Platform Owner</option>
                 <option value="platform_viewer">Platform Viewer</option>
@@ -662,7 +662,7 @@ function PlatformUsersSection() {
             <button
               onClick={handleCreate}
               disabled={creating || !form.name.trim() || !form.email.trim() || form.password.length < 6}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
             >
               {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
               Create User
@@ -679,7 +679,7 @@ function PlatformUsersSection() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 size={20} className="text-amber-500 animate-spin" />
+          <Loader2 size={20} className="text-alf-orange animate-spin" />
         </div>
       ) : users.length > 0 ? (
         <DataTable columns={columns} data={users} />

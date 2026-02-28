@@ -63,8 +63,8 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 h-14 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-amber-500/10 rounded">
-              <Bot size={16} className="text-amber-600" />
+            <div className="p-1.5 bg-alf-orange/10 rounded">
+              <Bot size={16} className="text-alf-orange" />
             </div>
             <div>
               <div className="text-sm font-semibold text-dark-text">Alf</div>
@@ -81,15 +81,15 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
           {messages.map((msg, i) => (
             <div key={i} className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : ''}`}>
               {msg.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <Bot size={14} className="text-amber-600" />
+                <div className="w-7 h-7 rounded-full bg-alf-orange/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bot size={14} className="text-alf-orange" />
                 </div>
               )}
               <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-first' : ''}`}>
                 <div
                   className={`rounded-lg px-3.5 py-2.5 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-amber-500 text-white ml-auto'
+                      ? 'bg-alf-orange text-white ml-auto'
                       : 'bg-gray-50 text-dark-text'
                   }`}
                 >
@@ -114,8 +114,8 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
 
           {loading && (
             <div className="flex gap-2.5">
-              <div className="w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
-                <Bot size={14} className="text-amber-600" />
+              <div className="w-7 h-7 rounded-full bg-alf-orange/10 flex items-center justify-center shrink-0">
+                <Bot size={14} className="text-alf-orange" />
               </div>
               <div className="bg-gray-50 rounded-lg px-3.5 py-2.5">
                 <div className="flex items-center gap-1.5">
@@ -139,13 +139,13 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Ask Alf..."
-              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
               disabled={loading}
             />
             <button
               onClick={handleSend}
               disabled={!input.trim() || loading}
-              className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-40"
+              className="p-2 bg-alf-orange text-white rounded-lg hover:bg-alf-orange transition-colors disabled:opacity-40"
             >
               <Send size={16} />
             </button>

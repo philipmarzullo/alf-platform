@@ -6,7 +6,7 @@
 
 Alf is the SaaS platform that powers tenant portals. This repo is the platform admin interface + backend API.
 
-**Key principle:** This repo is 100% platform. Amber accents, warm dark sidebar, Alf logo. No tenant-specific branding.
+**Key principle:** This repo is 100% platform. Alf Orange accents, near-black sidebar, AlfMark SVG logo. No tenant-specific branding.
 
 ## Architecture
 
@@ -22,21 +22,28 @@ Alf is the SaaS platform that powers tenant portals. This repo is the platform a
 - **Backend:** Express (in `backend/` directory)
 - **Database & Auth:** Supabase (PostgreSQL + Auth + RLS)
 
-## Branding
+## Branding (v2)
 
 | Element | Value |
 |---------|-------|
-| Primary color | `amber-*` (Tailwind amber palette) |
-| Sidebar bg | `dark-nav-warm` (#231A12) |
-| Logo | `/alf-logo.jpg` |
-| Active indicator | `bg-amber-500` |
-| Auth page subtitle | "Melmac Mission Control" |
+| Alf Orange | `alf-orange` (#C84B0A) — primary brand, buttons, accents |
+| Near Black | `alf-dark` (#1C1C1C) — sidebar bg, auth page bg |
+| Warm White | `alf-warm-white` (#F5F0EB) — light backgrounds |
+| Slate | `alf-slate` (#6B6B6B) — secondary text |
+| Bone | `alf-bone` (#E0D8D2) — borders, dividers |
+| Logo | `<AlfMark>` SVG component (`src/components/shared/AlfMark.jsx`) |
+| Wordmark | "alf" in Georgia serif, negative tracking |
+| Tagline | "Operations Intelligence" — Helvetica Neue, light 300, +4 tracking |
+| Active indicator | `bg-alf-orange` |
+
+All colors defined as Tailwind @theme tokens in `src/index.css`.
+Semantic amber (`bg-amber-500`) retained only in HealthDot and AttentionBanner for warning states.
 
 ## File Ownership
 
 - `src/pages/platform/` — Dashboard, Tenants, TenantDetail, NewTenant, Usage, Config, Agents, Templates, Brand
 - `src/pages/auth/` — Alf-branded login, forgot password, reset password
-- `src/components/layout/` — Sidebar (warm bg, amber), TopBar (platform breadcrumbs)
+- `src/components/layout/` — Sidebar (alf-dark bg, alf-orange accents), TopBar (platform breadcrumbs)
 - `src/contexts/` — Auth and User contexts (with isPlatformOwner)
 - `src/agents/` — Agent configs and registry (for the Agents admin page)
 - `backend/` — Express API (Claude proxy, credential management)

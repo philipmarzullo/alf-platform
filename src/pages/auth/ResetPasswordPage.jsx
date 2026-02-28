@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
+import AlfMark from '../../components/shared/AlfMark';
 
 export default function ResetPasswordPage() {
   const { updatePassword, authError } = useAuth();
@@ -33,12 +34,12 @@ export default function ResetPasswordPage() {
   const error = localError || authError;
 
   return (
-    <div className="min-h-screen bg-dark-nav-warm flex items-center justify-center px-4">
+    <div className="min-h-screen bg-alf-dark flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <img src="/alf-logo.jpg" alt="Alf" className="w-16 h-16 rounded-full mb-4" />
-          <h1 className="text-xl font-semibold text-white">Set New Password</h1>
-          <p className="text-sm text-white/50 mt-1">Alf Platform</p>
+          <AlfMark size={64} className="mb-3" />
+          <h1 className="text-xl text-white" style={{ fontFamily: 'Georgia, serif', letterSpacing: -1 }}>alf</h1>
+          <p className="text-xs text-white/50 mt-1">Set New Password</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -55,7 +56,7 @@ export default function ResetPasswordPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-3 py-2 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-amber-500"
+              className="w-full px-3 py-2 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-alf-orange"
               placeholder="At least 8 characters"
             />
           </div>
@@ -67,7 +68,7 @@ export default function ResetPasswordPage() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               required
-              className="w-full px-3 py-2 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-amber-500"
+              className="w-full px-3 py-2 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-alf-orange"
               placeholder="Re-enter password"
             />
           </div>
@@ -75,7 +76,7 @@ export default function ResetPasswordPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
           >
             {loading && <Loader2 size={16} className="animate-spin" />}
             {loading ? 'Updating...' : 'Update Password'}

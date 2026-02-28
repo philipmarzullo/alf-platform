@@ -195,7 +195,7 @@ export default function PlatformAgentDetailPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <Loader2 size={24} className="text-alf-orange animate-spin" />
       </div>
     );
   }
@@ -263,7 +263,7 @@ export default function PlatformAgentDetailPage() {
             type="text"
             value={form.name}
             onChange={(e) => update('name', e.target.value)}
-            className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
           />
         </FieldRow>
 
@@ -271,7 +271,7 @@ export default function PlatformAgentDetailPage() {
           <select
             value={form.department}
             onChange={(e) => update('department', e.target.value)}
-            className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
           >
             {DEPT_OPTIONS.map((d) => (
               <option key={d} value={d}>{DEPT_LABELS[d] || d}</option>
@@ -283,7 +283,7 @@ export default function PlatformAgentDetailPage() {
           <select
             value={form.model}
             onChange={(e) => update('model', e.target.value)}
-            className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500"
+            className="w-full md:w-80 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
           >
             {MODEL_OPTIONS.map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
@@ -298,7 +298,7 @@ export default function PlatformAgentDetailPage() {
           >
             {form.status === 'active' ? (
               <>
-                <ToggleRight size={28} className="text-amber-600" />
+                <ToggleRight size={28} className="text-alf-orange" />
                 <span className="text-sm font-medium text-green-700">Active</span>
               </>
             ) : (
@@ -322,7 +322,7 @@ export default function PlatformAgentDetailPage() {
             value={form.system_prompt}
             onChange={(e) => update('system_prompt', e.target.value)}
             rows={12}
-            className="w-full px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-amber-500 resize-y"
+            className="w-full px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange resize-y"
             placeholder="Enter the system prompt..."
           />
         </div>
@@ -333,7 +333,7 @@ export default function PlatformAgentDetailPage() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           {saving ? 'Saving...' : 'Save Changes'}
@@ -391,7 +391,7 @@ export default function PlatformAgentDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {knowledgeModules.map((km) => (
-              <span key={km} className="px-3 py-1 text-xs font-medium rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+              <span key={km} className="px-3 py-1 text-xs font-medium rounded-full bg-alf-orange/10 text-alf-orange border border-alf-orange/30">
                 {km}
               </span>
             ))}
@@ -414,7 +414,7 @@ export default function PlatformAgentDetailPage() {
                 render: (val, row) => (
                   <Link
                     to={`/platform/tenants/${row.tenantId}?tab=agents`}
-                    className="text-sm font-medium text-amber-700 hover:underline"
+                    className="text-sm font-medium text-alf-orange hover:underline"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {val}
