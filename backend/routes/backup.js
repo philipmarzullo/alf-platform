@@ -179,6 +179,12 @@ router.get('/history', async (req, res) => {
   const { type, tenantId, limit } = req.query;
 
   try {
+    // Simple count first to verify data exists
+    const { count, error: countErr } = await sb
+      .from('alf_backups')
+      .select('*', { count: 'exact', head: true });
+    console.log(`[backup] History: ${count} total rows in alf_backups (countErr: ${countErr?.message || 'none'})`);
+
     let query = sb
       .from('alf_backups')
       .select('*, tenant:alf_tenants(name, slug)')
@@ -189,6 +195,7 @@ router.get('/history', async (req, res) => {
     if (limit) query = query.limit(parseInt(limit, 10));
 
     const { data, error } = await query;
+    console.log(`[backup] History query returned ${data?.length || 0} rows, error: ${error?.message || 'none'}`);
     if (error) throw error;
 
     // Generate signed download URLs (catch per-row so one bad path doesn't kill the list)
