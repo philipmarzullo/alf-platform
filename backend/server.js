@@ -11,6 +11,7 @@ import backupRouter from './routes/backup.js';
 import customToolsRouter from './routes/customTools.js';
 import syncRouter from './routes/sync.js';
 import oauthRouter from './routes/oauth.js';
+import automationPreferencesRouter from './routes/automationPreferences.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -58,6 +59,7 @@ app.use('/api/dashboards', auth, dashboardsRouter);
 app.use('/api/backup', auth, backupRouter);
 app.use('/api/custom-tools', auth, customToolsRouter);
 app.use('/api/sync', auth, syncRouter);
+app.use('/api/automation-preferences', auth, automationPreferencesRouter);
 
 // --- 404 ---
 app.use((req, res) => {
