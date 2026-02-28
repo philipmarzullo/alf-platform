@@ -125,6 +125,7 @@ export default function TenantOverviewTab({
   const [newUserForm, setNewUserForm] = useState({ name: '', email: '', password: '', role: 'user' });
   const [creatingUser, setCreatingUser] = useState(false);
   const [userActionLoading, setUserActionLoading] = useState(null);
+  const [roleUpdating, setRoleUpdating] = useState(null);
   const [localUsers, setLocalUsers] = useState(users);
 
   useEffect(() => {
@@ -209,17 +210,58 @@ export default function TenantOverviewTab({
     setUserActionLoading(null);
   }
 
+  async function handleRoleChange(userId, newRole) {
+    setRoleUpdating(userId);
+    setError(null);
+    const { error: updateErr } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId);
+
+    if (updateErr) {
+      setError(updateErr.message);
+    } else {
+      setLocalUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role: newRole } : u));
+    }
+    setRoleUpdating(null);
+  }
+
+  const ROLE_OPTIONS = ['user', 'manager', 'admin', 'super-admin'];
+
+  const ROLE_STYLES = {
+    'platform_owner': 'bg-amber-50 text-amber-700 border-amber-200',
+    'super-admin': 'bg-purple-50 text-purple-700 border-purple-200',
+    'admin': 'bg-purple-50 text-purple-700 border-purple-200',
+    'manager': 'bg-blue-50 text-blue-700 border-blue-200',
+    'user': 'bg-gray-50 text-gray-700 border-gray-200',
+  };
+
   const userColumns = [
     { key: 'name', label: 'Name' },
     { key: 'email', label: 'Email', render: (val) => <span className="text-xs text-secondary-text">{val}</span> },
     {
       key: 'role', label: 'Role',
-      render: (val) => {
-        const styles = val === 'platform_owner' ? 'bg-amber-50 text-amber-700'
-          : (val === 'admin' || val === 'super-admin') ? 'bg-purple-50 text-purple-700'
-          : val === 'manager' ? 'bg-blue-50 text-blue-700'
-          : 'bg-gray-100 text-gray-700';
-        return <span className={`px-2 py-0.5 text-xs font-medium rounded-full capitalize ${styles}`}>{val}</span>;
+      render: (val, row) => {
+        if (val === 'platform_owner') {
+          return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">platform_owner</span>;
+        }
+        return (
+          <div className="relative inline-flex items-center">
+            <select
+              value={val}
+              onChange={(e) => handleRoleChange(row.id, e.target.value)}
+              disabled={roleUpdating === row.id}
+              className={`text-xs font-medium rounded-full pl-2.5 pr-6 py-1 border appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50 ${ROLE_STYLES[val] || ROLE_STYLES.user}`}
+            >
+              {ROLE_OPTIONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            {roleUpdating === row.id && (
+              <Loader2 size={12} className="absolute right-1.5 animate-spin text-gray-400 pointer-events-none" />
+            )}
+          </div>
+        );
       },
     },
     {
@@ -460,6 +502,7 @@ export default function TenantOverviewTab({
                   <option value="user">User</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
+                  <option value="super-admin">Super-Admin</option>
                 </select>
               </div>
             </div>
