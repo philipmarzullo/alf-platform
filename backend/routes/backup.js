@@ -191,17 +191,21 @@ router.get('/history', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Generate signed download URLs
+    // Generate signed download URLs (catch per-row so one bad path doesn't kill the list)
     const rows = await Promise.all(
       (data || []).map(async (row) => {
-        const downloadUrl = await getSignedUrl(sb, row.storage_path);
-        return { ...row, downloadUrl };
+        try {
+          const downloadUrl = await getSignedUrl(sb, row.storage_path);
+          return { ...row, downloadUrl };
+        } catch {
+          return { ...row, downloadUrl: null };
+        }
       })
     );
 
     res.json(rows);
   } catch (err) {
-    console.error('[backup] History failed:', err.message);
+    console.error('[backup] History failed:', err.message, err);
     res.status(500).json({ error: 'Failed to load backup history' });
   }
 });

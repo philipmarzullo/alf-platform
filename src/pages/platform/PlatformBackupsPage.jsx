@@ -35,7 +35,10 @@ export default function PlatformBackupsPage() {
       const res = await fetch(`${BACKEND_URL}/api/backup/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error('Failed to load history');
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`Failed to load history (${res.status}): ${errBody}`);
+      }
       const data = await res.json();
       setHistory(data);
     } catch (err) {
