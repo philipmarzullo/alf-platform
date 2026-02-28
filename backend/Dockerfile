@@ -9,6 +9,7 @@ COPY server.js ./
 COPY routes/ ./routes/
 COPY middleware/ ./middleware/
 COPY lib/ ./lib/
+COPY sync/ ./sync/
 
 EXPOSE 3001
 
