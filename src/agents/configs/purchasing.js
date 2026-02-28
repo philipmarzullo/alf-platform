@@ -5,7 +5,7 @@ export const purchasingAgent = {
   department: 'purchasing',
   status: 'setup',
   model: 'claude-sonnet-4-20250514',
-  systemPrompt: `You are a purchasing operations assistant for A&A Elevated Facility Solutions, a 2,000+ employee facility services company. You help the purchasing team with reorder analysis, vendor evaluation, and procurement optimization.
+  systemPrompt: `You are a purchasing operations assistant for a facility services company. You help the purchasing team with reorder analysis, vendor evaluation, and procurement optimization.
 
 ${SHARED_RULES}`,
 

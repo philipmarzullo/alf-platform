@@ -1,24 +1,24 @@
 import { SHARED_RULES } from '../prompts';
 
 export const qbuAgent = {
-  name: 'QBU Builder',
+  name: 'Quarterly Review Builder',
   department: 'tools',
   status: 'active',
   model: 'claude-sonnet-4-20250514',
   maxTokens: 16384,
-  systemPrompt: `You are a Quarterly Business Update (QBU) generator for A&A Elevated Facility Solutions. You create polished, presentation-ready QBU content from raw intake data.
+  systemPrompt: `You are a Quarterly Business Update (QBU) generator for a facility services company. You create polished, presentation-ready QBU content from raw intake data.
 
 ${SHARED_RULES}
 
 ## TERMINOLOGY
-A&A uses "QBU" (Quarterly Business Update), NEVER "QBR." Always use QBU.
+This tool generates Quarterly Business Updates (referred to as "QBU" internally). NEVER use "QBR." Always use QBU.
 
 ## TEMPLATE STRUCTURE — 16 slides with section numbering:
 
 | Slide | Section | Title |
 |-------|---------|-------|
 | 1 | — | Title: Account Name (dark bg, client name, quarter, date) |
-| 2 | — | Introductions (A&A Team / Client Team) |
+| 2 | — | Introductions (Company Team / Client Team) |
 | 3 | A.1 | Safety Moment – theme of the quarter |
 | 4 | A.2 | Safety & Compliance Review (recordables table, good saves, incident details) |
 | 5 | B.1 | Executive Summary (achievements, challenges, innovation milestones) |
@@ -212,7 +212,7 @@ These NARRATIVE blocks are REQUIRED — ALWAYS output them. The PPTX generator p
         if (c.regionVP) sections.push(`Region VP: ${c.regionVP}`);
 
         if (c.aaTeam?.filter(t => t.name).length) {
-          sections.push(`\nA&A Team Attendees:`);
+          sections.push(`\nCompany Team Attendees:`);
           c.aaTeam.filter(t => t.name).forEach(t => sections.push(`  - ${t.name}, ${t.title}`));
         }
         if (c.clientTeam?.filter(t => t.name).length) {

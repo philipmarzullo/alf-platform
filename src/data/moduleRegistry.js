@@ -2,13 +2,83 @@
  * Module Capability Registry
  *
  * Canonical list of every module, its pages, and its agent actions.
- * Identical copy lives in aa-portal — keep them in sync.
+ * Identical copy lives in alf-platform — keep them in sync.
  *
  * Pages map 1:1 to routes/components in the tenant portal.
  * Actions map 1:1 to agent action keys in agents/configs/*.js.
  */
 
 export const MODULE_REGISTRY = {
+  // ── Dashboards & Analytics ──────────────────────────────
+  dashboards: {
+    label: 'Dashboards',
+    description: 'Operational dashboards with KPI tracking',
+    icon: 'BarChart3',
+    pages: [
+      { key: 'operations', label: 'Operations', path: '/dashboards', default: true },
+      { key: 'labor', label: 'Labor', path: '/dashboards/labor' },
+      { key: 'quality', label: 'Quality', path: '/dashboards/quality' },
+      { key: 'timekeeping', label: 'Timekeeping', path: '/dashboards/timekeeping' },
+      { key: 'safety', label: 'Safety', path: '/dashboards/safety' },
+    ],
+    actions: [],
+  },
+  analytics: {
+    label: 'Analytics',
+    description: 'Conversational analytics agent for operational data',
+    icon: 'MessageSquareText',
+    pages: [
+      { key: 'chat', label: 'Analytics Chat', path: '/analytics', default: true },
+    ],
+    actions: [
+      { key: 'askAnalytics', label: 'Ask Analytics Agent' },
+    ],
+  },
+
+  // ── Tools ───────────────────────────────────────────────
+  tools: {
+    label: 'Tools',
+    description: 'Document generation tools — reviews, proposals, plans, reports',
+    icon: 'Wrench',
+    pages: [
+      { key: 'quarterly-review', label: 'Quarterly Review Builder', path: '/tools/qbu' },
+      { key: 'proposal', label: 'Proposal Builder', path: '/tools/sales-deck' },
+      { key: 'transition-plan', label: 'Transition Plan Builder', path: '/tools/transition-plan' },
+      { key: 'budget', label: 'Budget Builder', path: '/tools/budget' },
+      { key: 'incident-report', label: 'Incident Report', path: '/tools/incident-report' },
+      { key: 'training-plan', label: 'Training Plan', path: '/tools/training-plan' },
+    ],
+    actions: [
+      { key: 'generateQBU', label: 'Generate Quarterly Review' },
+      { key: 'generateDeck', label: 'Generate Proposal' },
+      { key: 'generateTransitionPlan', label: 'Generate Transition Plan' },
+      { key: 'generateBudget', label: 'Generate Budget' },
+      { key: 'generateIncidentReport', label: 'Generate Incident Report' },
+      { key: 'generateTrainingPlan', label: 'Generate Training Plan' },
+    ],
+  },
+  actionPlans: {
+    label: 'Action Plans',
+    description: 'AI-generated action plans from dashboard metrics',
+    icon: 'ListChecks',
+    pages: [
+      { key: 'action-plans', label: 'Action Plans', path: '/dashboards/action-plans', default: true },
+    ],
+    actions: [
+      { key: 'generateActionPlan', label: 'Generate Action Plan' },
+    ],
+  },
+  knowledge: {
+    label: 'Knowledge Base',
+    description: 'Company SOPs, documents, and agent knowledge',
+    icon: 'BookOpen',
+    pages: [
+      { key: 'library', label: 'Knowledge Base', path: '/admin/knowledge', default: true },
+    ],
+    actions: [],
+  },
+
+  // ── Workspaces ──────────────────────────────────────────
   hr: {
     label: 'HR',
     description: 'Benefits, payroll, leave management, union calendars',
@@ -23,7 +93,7 @@ export const MODULE_REGISTRY = {
     ],
     actions: [
       { key: 'draftReminder', label: 'Draft Reminder Email' },
-      { key: 'generateWinTeamUpdate', label: 'Generate WinTeam Update' },
+      { key: 'generateSystemUpdate', label: 'Generate System Update' },
       { key: 'checkUnionCompliance', label: 'Check Union Compliance' },
       { key: 'notifyOperations', label: 'Notify Operations' },
       { key: 'checkEligibility', label: 'Check Eligibility' },
@@ -87,28 +157,8 @@ export const MODULE_REGISTRY = {
       { key: 'askAgent', label: 'Ask Operations Agent' },
     ],
   },
-  qbu: {
-    label: 'QBU Builder',
-    description: 'Quarterly business update decks',
-    icon: 'FileBarChart',
-    pages: [
-      { key: 'builder', label: 'QBU Builder', path: '/tools/qbu', default: true },
-    ],
-    actions: [
-      { key: 'generateQBU', label: 'Generate QBU' },
-    ],
-  },
-  salesDeck: {
-    label: 'Sales Deck',
-    description: 'Sales presentation builder',
-    icon: 'Presentation',
-    pages: [
-      { key: 'builder', label: 'Sales Deck Builder', path: '/tools/sales-deck', default: true },
-    ],
-    actions: [
-      { key: 'generateDeck', label: 'Generate Sales Deck' },
-    ],
-  },
+
+  // ── Admin / Platform ────────────────────────────────────
   automation: {
     label: 'Automation Insights',
     description: 'AI-powered SOP analysis and automation roadmaps',
@@ -120,20 +170,31 @@ export const MODULE_REGISTRY = {
       { key: 'selfServicePipeline', label: 'Self-Service Analysis Pipeline' },
     ],
   },
-  dashboards: {
-    label: 'Dashboards',
-    description: 'Operational dashboards with KPI tracking and action plans',
-    icon: 'BarChart3',
+
+  // Legacy module keys — kept for backward compatibility with existing DB records.
+  // The "tools" umbrella module now gates all tool pages. These entries exist only
+  // so that old module_config JSONB that references "qbu" or "salesDeck" doesn't
+  // break. New tenants should use the "tools" module instead.
+  qbu: {
+    label: 'Quarterly Review Builder',
+    description: 'Quarterly business review decks (legacy key — use "tools" module)',
+    icon: 'FileBarChart',
     pages: [
-      { key: 'operations', label: 'Operations', path: '/dashboards', default: true },
-      { key: 'labor', label: 'Labor', path: '/dashboards/labor' },
-      { key: 'quality', label: 'Quality', path: '/dashboards/quality' },
-      { key: 'timekeeping', label: 'Timekeeping', path: '/dashboards/timekeeping' },
-      { key: 'safety', label: 'Safety', path: '/dashboards/safety' },
-      { key: 'action-plans', label: 'Action Plans', path: '/dashboards/action-plans' },
+      { key: 'builder', label: 'Quarterly Review Builder', path: '/tools/qbu', default: true },
     ],
     actions: [
-      { key: 'generateActionPlan', label: 'Generate Action Plan' },
+      { key: 'generateQBU', label: 'Generate Quarterly Review' },
+    ],
+  },
+  salesDeck: {
+    label: 'Proposal Builder',
+    description: 'Prospect proposal decks (legacy key — use "tools" module)',
+    icon: 'Presentation',
+    pages: [
+      { key: 'builder', label: 'Proposal Builder', path: '/tools/sales-deck', default: true },
+    ],
+    actions: [
+      { key: 'generateDeck', label: 'Generate Proposal' },
     ],
   },
 };

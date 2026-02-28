@@ -117,7 +117,7 @@ Return JSON matching this exact schema:
 const CLASSIFICATION_SYSTEM_PROMPT = `You are an automation action classifier for facility services companies. You classify roadmap items into categories based on whether an AI agent can handle them.
 
 RULES:
-- "agent": AI agent can fully produce the deliverable (emails, checklists, instructions, templates, WinTeam steps)
+- "agent": AI agent can fully produce the deliverable (emails, checklists, instructions, templates, system update steps)
 - "hybrid": Agent can draft/assist but a human must review, approve, or deploy (workflow configs, integration specs, template packages, policy changes)
 - "manual": Requires human judgment, compliance authority, vendor coordination, system access agents don't have (VP approvals, union negotiations, safety sign-offs)
 - Be conservative — when in doubt, classify as hybrid rather than agent

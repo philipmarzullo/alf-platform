@@ -1,22 +1,20 @@
-import { SHARED_RULES, PEOPLE_FIRST_GUIDANCE } from '../prompts';
+import { SHARED_RULES } from '../prompts';
 
 export const hrAgent = {
   name: 'HR Agent',
   department: 'hr',
   status: 'active',
   model: 'claude-sonnet-4-20250514',
-  systemPrompt: `You are an HR operations assistant for A&A Elevated Facility Solutions, a 2,000+ employee, employee-owned (ESOP) facility services company. You help HR coordinators process benefits enrollments, pay rate changes, leave of absence requests, and unemployment claims.
+  systemPrompt: `You are an HR operations assistant for a facility services company. You help HR coordinators process benefits enrollments, pay rate changes, leave of absence requests, and unemployment claims.
 
 ${SHARED_RULES}
 
 HR-Specific Rules:
-- Follow A&A's SOPs exactly as documented. Do not improvise process steps.
-- Generate actionable outputs: email drafts, WinTeam step-by-step instructions, compliance checklists, deadline summaries.
-- Reference A&A systems by name: WinTeam, HelpScout, Employee Navigator, E-Hub.
-- When generating WinTeam instructions, specify: which section, which tab, which field, what value, what effective date.
-- When drafting emails, use a respectful and supportive tone appropriate for a People First company.
-
-${PEOPLE_FIRST_GUIDANCE}`,
+- Follow the company's SOPs exactly as documented. Do not improvise process steps.
+- Generate actionable outputs: email drafts, system update instructions, compliance checklists, deadline summaries.
+- Reference the company's HR systems when they appear in the knowledge base context.
+- When generating system update instructions, specify: which section, which tab, which field, what value, what effective date.
+- When drafting emails, use a respectful and supportive tone.`,
 
   knowledgeModules: [
     'Benefits Enrollment SOP',
@@ -30,12 +28,12 @@ ${PEOPLE_FIRST_GUIDANCE}`,
     draftReminder: {
       label: 'Draft Reminder Email',
       description: 'Generate a benefits enrollment reminder for an employee',
-      promptTemplate: (data) => `Draft a benefits enrollment reminder email for ${data.employeeName}. They were hired on ${data.hireDate} and have ${data.daysRemaining} days remaining in their enrollment window. Use Employee Navigator as the enrollment portal. Keep it supportive and aligned with People First values.`,
+      promptTemplate: (data) => `Draft a benefits enrollment reminder email for ${data.employeeName}. They were hired on ${data.hireDate} and have ${data.daysRemaining} days remaining in their enrollment window. Keep it supportive and professional.`,
     },
-    generateWinTeamUpdate: {
-      label: 'Generate WinTeam Update',
-      description: 'Step-by-step WinTeam field update instructions',
-      promptTemplate: (data) => `Generate step-by-step WinTeam update instructions for: ${data.description}. Employee: ${data.employeeName}. Include the specific section, tab, field name, value to enter, and effective date. Be precise — HR coordinators will follow these instructions exactly.`,
+    generateSystemUpdate: {
+      label: 'Generate System Update',
+      description: 'Step-by-step HR system field update instructions',
+      promptTemplate: (data) => `Generate step-by-step HR system update instructions for: ${data.description}. Employee: ${data.employeeName}. Include the specific section, tab, field name, value to enter, and effective date. Be precise — HR coordinators will follow these instructions exactly.`,
     },
     checkUnionCompliance: {
       label: 'Check Union Compliance',
@@ -65,7 +63,7 @@ ${PEOPLE_FIRST_GUIDANCE}`,
     generateRateChangeBatch: {
       label: 'Generate Rate Change Batch',
       description: 'Produce employee list and new rates for union contract',
-      promptTemplate: (data) => `Generate a rate change batch for: ${data.union}. Effective date: ${data.effectiveDate}. Current rate: ${data.currentRate}/hr. New rate: ${data.newRate}/hr. Employees affected: ${data.employeesAffected}. Produce a WinTeam batch update checklist including: fields to update, effective date, any benefits or deduction impacts, and verification steps.`,
+      promptTemplate: (data) => `Generate a rate change batch for: ${data.union}. Effective date: ${data.effectiveDate}. Current rate: ${data.currentRate}/hr. New rate: ${data.newRate}/hr. Employees affected: ${data.employeesAffected}. Produce a batch update checklist including: fields to update, effective date, any benefits or deduction impacts, and verification steps.`,
     },
     askAgent: {
       label: 'Ask HR Agent',

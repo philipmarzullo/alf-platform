@@ -2,7 +2,12 @@
  * Tenant Tier Registry
  *
  * Defines Melmac / Orbit / Galaxy tier metadata, default modules, and limits.
- * Identical copy lives in aa-portal — keep them in sync.
+ * Identical copy lives in alf-platform — keep them in sync.
+ *
+ * Tier ladder:
+ *   Melmac  = Dashboards + Analytics
+ *   Orbit   = + Tools + Action Plans + Knowledge Base
+ *   Galaxy  = + Workspaces + Automation (full platform)
  */
 
 import { fullModuleConfig } from './moduleRegistry';
@@ -11,8 +16,8 @@ export const TIER_REGISTRY = {
   melmac: {
     key: 'melmac',
     label: 'Melmac',
-    description: 'Core modules for small operations',
-    modules: ['hr', 'finance', 'ops'],
+    description: 'Dashboards and analytics for small operations',
+    modules: ['dashboards', 'analytics'],
     maxUsers: 10,
     maxAgentCalls: 1_000,
     badge: { bg: 'bg-gray-100', text: 'text-gray-700' },
@@ -20,8 +25,8 @@ export const TIER_REGISTRY = {
   orbit: {
     key: 'orbit',
     label: 'Orbit',
-    description: 'Extended modules for growing teams',
-    modules: ['hr', 'finance', 'purchasing', 'sales', 'ops', 'qbu'],
+    description: 'Dashboards + tools + action plans for growing teams',
+    modules: ['dashboards', 'analytics', 'tools', 'actionPlans', 'knowledge'],
     maxUsers: 25,
     maxAgentCalls: 5_000,
     badge: { bg: 'bg-blue-50', text: 'text-blue-700' },
@@ -29,8 +34,11 @@ export const TIER_REGISTRY = {
   galaxy: {
     key: 'galaxy',
     label: 'Galaxy',
-    description: 'Full platform with automation and self-service pipeline',
-    modules: ['hr', 'finance', 'purchasing', 'sales', 'ops', 'qbu', 'salesDeck', 'automation', 'dashboards'],
+    description: 'Full platform with workspaces, automation, and self-service pipeline',
+    modules: [
+      'dashboards', 'analytics', 'tools', 'actionPlans', 'knowledge',
+      'hr', 'finance', 'purchasing', 'sales', 'ops', 'automation',
+    ],
     maxUsers: 100,
     maxAgentCalls: 25_000,
     badge: { bg: 'bg-purple-50', text: 'text-purple-700' },
