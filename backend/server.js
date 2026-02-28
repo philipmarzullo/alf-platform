@@ -7,6 +7,7 @@ import credentialsRouter from './routes/credentials.js';
 import platformCredentialsRouter from './routes/platformCredentials.js';
 import sopAnalysisRouter from './routes/sopAnalysis.js';
 import dashboardsRouter from './routes/dashboards.js';
+import backupRouter from './routes/backup.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -48,6 +49,7 @@ app.use('/api/credentials', auth, credentialsRouter);
 app.use('/api/platform-credentials', auth, platformCredentialsRouter);
 app.use('/api/sop-analysis', auth, sopAnalysisRouter);
 app.use('/api/dashboards', auth, dashboardsRouter);
+app.use('/api/backup', auth, backupRouter);
 
 // --- 404 ---
 app.use((req, res) => {

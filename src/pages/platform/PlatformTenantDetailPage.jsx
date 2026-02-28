@@ -6,7 +6,7 @@ import {
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
   Plus, Mail, UserX, UserCheck, Palette, RefreshCw, ChevronRight, BarChart3,
-  GripVertical,
+  GripVertical, Download, HardDrive, AlertTriangle,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
@@ -37,6 +37,7 @@ const TABS = [
   { key: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { key: 'automation', label: 'Automation', icon: FlaskConical },
   { key: 'dashboards', label: 'Dashboards', icon: BarChart3 },
+  { key: 'backup', label: 'Backup', icon: HardDrive },
 ];
 
 // Which agents each module unlocks
@@ -772,6 +773,10 @@ export default function PlatformTenantDetailPage() {
       {/* Dashboards Tab */}
       {activeTab === 'dashboards' && (
         <DashboardsTab tenantId={id} />
+      )}
+
+      {activeTab === 'backup' && (
+        <BackupTab tenantId={id} tenantSlug={tenant?.slug || tenant?.name} />
       )}
     </div>
   );
@@ -3438,6 +3443,198 @@ function DashboardsTab({ tenantId }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// --- Backup Tab ---
+
+const BACKUP_CATEGORIES = [
+  { key: 'profiles', label: 'User Profiles', icon: Users },
+  { key: 'sites', label: 'Sites', icon: MapPin },
+  { key: 'clientContacts', label: 'Client Contacts', icon: Mail },
+  { key: 'documents', label: 'Knowledge Base', icon: BookOpen },
+  { key: 'toolSubmissions', label: 'Tool Submissions', icon: FileText },
+  { key: 'agentOverrides', label: 'Agent Overrides', icon: Bot },
+  { key: 'sopAnalyses', label: 'SOP Analyses', icon: FlaskConical },
+  { key: 'automationRoadmaps', label: 'Automation Roadmaps', icon: Zap },
+  { key: 'automationActions', label: 'Automation Actions', icon: Zap },
+  { key: 'dashboardConfigs', label: 'Dashboard Configs', icon: BarChart3 },
+  { key: 'userDashboardConfigs', label: 'User Dashboard Configs', icon: BarChart3 },
+  { key: 'roleTemplates', label: 'Role Templates', icon: Users },
+  { key: 'siteAssignments', label: 'Site Assignments', icon: MapPin },
+  { key: 'qbuSubmissions', label: 'QBU Submissions', icon: FileText },
+  { key: 'qbuIntakeData', label: 'QBU Intake Data', icon: FileText },
+  { key: 'qbuPhotos', label: 'QBU Photos', icon: FileText },
+  { key: 'qbuTestimonials', label: 'QBU Testimonials', icon: FileText },
+];
+
+const BACKEND_URL_BACKUP = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+
+function BackupTab({ tenantId, tenantSlug }) {
+  const [summary, setSummary] = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [lastExport, setLastExport] = useState(() => {
+    try { return localStorage.getItem(`backup_last_${tenantId}`) || null; } catch { return null; }
+  });
+  const [exportError, setExportError] = useState(null);
+
+  useEffect(() => {
+    loadSummary();
+  }, [tenantId]);
+
+  async function loadSummary() {
+    setLoadingSummary(true);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${BACKEND_URL_BACKUP}/api/backup/${tenantId}/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load summary');
+      const data = await res.json();
+      setSummary(data.counts);
+    } catch (err) {
+      console.error('[backup] Summary error:', err);
+    } finally {
+      setLoadingSummary(false);
+    }
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${BACKEND_URL_BACKUP}/api/backup/${tenantId}/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Export failed');
+      }
+
+      // Extract filename from Content-Disposition or build a fallback
+      const disposition = res.headers.get('Content-Disposition');
+      let filename = `${(tenantSlug || 'tenant').replace(/[^a-z0-9]/gi, '-')}_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      if (disposition) {
+        const match = disposition.match(/filename="?(.+?)"?$/);
+        if (match) filename = match[1];
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      const now = new Date().toISOString();
+      setLastExport(now);
+      try { localStorage.setItem(`backup_last_${tenantId}`, now); } catch {}
+    } catch (err) {
+      console.error('[backup] Export error:', err);
+      setExportError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const totalRows = summary ? Object.values(summary).reduce((a, b) => a + b, 0) : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Export Card */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-dark-text flex items-center gap-2">
+              <HardDrive size={20} />
+              Tenant Data Export
+            </h3>
+            <p className="text-sm text-secondary-text mt-1">
+              Download a complete JSON snapshot of this tenant's data — knowledge base, tool submissions, user profiles, dashboard configs, and more.
+            </p>
+          </div>
+          <button
+            onClick={handleExport}
+            disabled={exporting || loadingSummary}
+            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {exporting ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                Export Tenant Data
+              </>
+            )}
+          </button>
+        </div>
+
+        {exportError && (
+          <div className="mt-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+            {exportError}
+          </div>
+        )}
+
+        {lastExport && (
+          <p className="mt-3 text-xs text-secondary-text">
+            Last export: {new Date(lastExport).toLocaleString()}
+          </p>
+        )}
+      </div>
+
+      {/* Data Summary */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h4 className="text-sm font-semibold text-dark-text mb-4">
+          What's Included {!loadingSummary && <span className="text-secondary-text font-normal">— {totalRows} total rows</span>}
+        </h4>
+
+        {loadingSummary ? (
+          <div className="flex items-center gap-2 text-secondary-text text-sm py-4">
+            <Loader2 size={16} className="animate-spin" /> Loading summary...
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {BACKUP_CATEGORIES.map(({ key, label, icon: Icon }) => {
+              const count = summary?.[key] ?? 0;
+              return (
+                <div
+                  key={key}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-100 bg-gray-50"
+                >
+                  <Icon size={14} className="text-secondary-text shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs text-secondary-text truncate">{label}</p>
+                    <p className="text-sm font-medium text-dark-text">{count}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Exclusions Notice */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
+        <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+        <div className="text-sm text-amber-800">
+          <p className="font-medium mb-1">Excluded from export</p>
+          <ul className="list-disc list-inside space-y-0.5 text-amber-700">
+            <li><strong>API credentials</strong> — encrypted keys are never exported for security</li>
+            <li><strong>Snowflake sync data</strong> (sf_* tables) — source of truth is external</li>
+            <li><strong>Usage logs</strong> — platform telemetry, not tenant-owned</li>
+            <li><strong>Generated decks</strong> — binary PPTX files (reference paths only in tool submissions)</li>
+          </ul>
+        </div>
       </div>
     </div>
   );
