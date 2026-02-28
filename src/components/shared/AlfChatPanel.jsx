@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Bot, User, Copy, Check } from 'lucide-react';
+import { X, Send, User, Copy, Check } from 'lucide-react';
 import { chatWithAgent } from '../../agents/api';
+import AlfMark from './AlfMark';
 
 export default function AlfChatPanel({ open, onClose, pageContext }) {
   const [messages, setMessages] = useState([]);
@@ -62,12 +63,10 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
       <div className="fixed top-0 right-0 h-screen w-full md:w-[420px] bg-white shadow-xl z-50 flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-4 h-14 border-b border-gray-200 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-alf-orange/10 rounded">
-              <Bot size={16} className="text-alf-orange" />
-            </div>
+          <div className="flex items-center gap-2.5">
+            <AlfMark variant="light" size="sm" />
             <div>
-              <div className="text-sm font-semibold text-dark-text">Alf</div>
+              <div className="text-sm font-semibold text-dark-text">Ask Alf</div>
               <div className="text-[11px] text-secondary-text">{pageContext || 'Platform Assistant'}</div>
             </div>
           </div>
@@ -82,7 +81,7 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
             <div key={i} className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : ''}`}>
               {msg.role === 'assistant' && (
                 <div className="w-7 h-7 rounded-full bg-alf-orange/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <Bot size={14} className="text-alf-orange" />
+                  <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: 14, fontWeight: 400 }} className="text-alf-orange leading-none">a</span>
                 </div>
               )}
               <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-first' : ''}`}>
@@ -115,7 +114,7 @@ export default function AlfChatPanel({ open, onClose, pageContext }) {
           {loading && (
             <div className="flex gap-2.5">
               <div className="w-7 h-7 rounded-full bg-alf-orange/10 flex items-center justify-center shrink-0">
-                <Bot size={14} className="text-alf-orange" />
+                <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: 14, fontWeight: 400 }} className="text-alf-orange leading-none">a</span>
               </div>
               <div className="bg-gray-50 rounded-lg px-3.5 py-2.5">
                 <div className="flex items-center gap-1.5">

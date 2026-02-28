@@ -4,7 +4,6 @@ import { useUser } from './contexts/UserContext';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import PageWrapper from './components/layout/PageWrapper';
-import AskAlfButton from './components/shared/AskAlfButton';
 import LoginPage from './pages/auth/LoginPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
@@ -42,10 +41,9 @@ function PlatformLayout({ children }) {
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar />
+        <TopBar pageContext={pageContext} />
         <PageWrapper>{children}</PageWrapper>
       </div>
-      <AskAlfButton pageContext={pageContext} />
     </div>
   );
 }
