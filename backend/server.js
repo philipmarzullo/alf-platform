@@ -10,6 +10,7 @@ import dashboardsRouter from './routes/dashboards.js';
 import backupRouter from './routes/backup.js';
 import customToolsRouter from './routes/customTools.js';
 import syncRouter from './routes/sync.js';
+import oauthRouter from './routes/oauth.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -44,6 +45,9 @@ app.get('/health', (req, res) => {
     supabase_configured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY),
   });
 });
+
+// --- OAuth routes (no global auth — handled per-endpoint inside router) ---
+app.use('/api/oauth', oauthRouter);
 
 // --- Authenticated routes ---
 app.use('/api/claude', auth, claudeRouter);
