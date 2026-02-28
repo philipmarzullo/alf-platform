@@ -757,6 +757,239 @@ router.post('/:tenantId/config/recommend', rateLimit, async (req, res) => {
   }
 });
 
+// ─── Home Summary (Aggregated sf_* data for home dashboard) ─────────────────
+
+/**
+ * GET /api/dashboards/:tenantId/home-summary
+ *
+ * Returns aggregated metrics from all 5 sf_* domains for the home dashboard.
+ * Single call replaces the old mock-based computeDashboard().
+ */
+router.get('/:tenantId/home-summary', async (req, res) => {
+  const { tenantId } = req.params;
+  const effectiveTenantId = resolveEffectiveTenantId(req, tenantId);
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  if (!PLATFORM_ROLES.includes(req.user?.role) && effectiveTenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // No date filtering by default — show all available data
+  const filters = {
+    dateFrom: req.query.dateFrom || null,
+    dateTo: req.query.dateTo || null,
+    jobIds: req.query.jobIds ? req.query.jobIds.split(',') : null,
+  };
+
+  const key = cacheKey(effectiveTenantId, 'home-summary', filters);
+  const cached = getCached(key);
+  if (cached) return res.json(cached);
+
+  try {
+    // Fetch all domains in parallel
+    const [jobs, tickets, labor, quality, timekeeping, safety] = await Promise.all([
+      DASHBOARD_QUERIES.JOBS(req.supabase, effectiveTenantId),
+      DASHBOARD_QUERIES.WORK_TICKETS_SUMMARY(req.supabase, effectiveTenantId, filters),
+      DASHBOARD_QUERIES.LABOR_BUDGET_VS_ACTUAL(req.supabase, effectiveTenantId, filters),
+      DASHBOARD_QUERIES.QUALITY_METRICS(req.supabase, effectiveTenantId, filters),
+      DASHBOARD_QUERIES.TIMEKEEPING_SUMMARY(req.supabase, effectiveTenantId, filters),
+      DASHBOARD_QUERIES.SAFETY_METRICS(req.supabase, effectiveTenantId, filters),
+    ]);
+
+    // --- Hero metrics ---
+    const totalProperties = jobs.length;
+
+    const totalTickets = tickets.length;
+    const completedTickets = tickets.filter(t => t.status === 'completed').length;
+    const openTickets = totalTickets - completedTickets;
+    const completionRate = totalTickets ? +(completedTickets / totalTickets * 100).toFixed(1) : 0;
+
+    const totalBudget = labor.reduce((s, r) => s + (r.budget_dollars || 0), 0);
+    const totalActual = labor.reduce((s, r) => s + (r.actual_dollars || 0), 0);
+    const laborVariance = totalBudget ? +((totalActual - totalBudget) / totalBudget * 100).toFixed(1) : 0;
+    const totalOtHours = labor.reduce((s, r) => s + (r.ot_hours || 0), 0);
+
+    const totalAudits = quality.reduce((s, r) => s + (r.audits || 0), 0);
+    const totalCAs = quality.reduce((s, r) => s + (r.corrective_actions || 0), 0);
+    const caRatio = totalAudits ? +(totalCAs / totalAudits * 100).toFixed(1) : 0;
+
+    const totalPunches = timekeeping.length;
+    const acceptedPunches = timekeeping.filter(t => t.punch_status === 'accepted').length;
+    const acceptanceRate = totalPunches ? +(acceptedPunches / totalPunches * 100).toFixed(1) : 0;
+
+    const recordableIncidents = safety.reduce((s, r) => s + (r.recordable_incidents || 0), 0);
+    const goodSaves = safety.reduce((s, r) => s + (r.good_saves || 0), 0);
+    const trirs = safety.filter(r => r.trir != null).map(r => r.trir);
+    const avgTrir = trirs.length ? +(trirs.reduce((s, v) => s + v, 0) / trirs.length).toFixed(3) : null;
+
+    // --- Per-domain summaries (for workspace cards) ---
+    const domains = {
+      operations: {
+        hasData: tickets.length > 0,
+        stats: [
+          `${totalTickets.toLocaleString()} total tickets`,
+          `${completedTickets.toLocaleString()} completed (${completionRate}%)`,
+          `${openTickets.toLocaleString()} open`,
+        ],
+      },
+      labor: {
+        hasData: labor.length > 0,
+        stats: [
+          `$${Math.round(totalBudget).toLocaleString()} budget`,
+          `$${Math.round(totalActual).toLocaleString()} actual (${laborVariance > 0 ? '+' : ''}${laborVariance}%)`,
+          `${totalOtHours.toLocaleString()} OT hours`,
+        ],
+      },
+      quality: {
+        hasData: quality.length > 0,
+        stats: [
+          `${totalAudits.toLocaleString()} audits`,
+          `${totalCAs.toLocaleString()} corrective actions`,
+          `${caRatio}% CA ratio`,
+        ],
+      },
+      timekeeping: {
+        hasData: timekeeping.length > 0,
+        stats: [
+          `${totalPunches.toLocaleString()} punches`,
+          `${acceptanceRate}% accepted`,
+          `${(totalPunches - acceptedPunches).toLocaleString()} exceptions`,
+        ],
+      },
+      safety: {
+        hasData: safety.length > 0,
+        stats: [
+          `${recordableIncidents} recordable incidents`,
+          `${goodSaves} good saves`,
+          avgTrir != null ? `${avgTrir} avg TRIR` : 'No TRIR data',
+        ],
+      },
+    };
+
+    // --- Attention items (anomalies from sf_* data) ---
+    const attentionItems = [];
+    let taskId = 0;
+
+    // Operations: sites with low completion rate
+    const jobMap = {};
+    for (const j of jobs) jobMap[j.id] = j.job_name;
+
+    const ticketsBySite = {};
+    for (const t of tickets) {
+      const site = t.job_id;
+      if (!ticketsBySite[site]) ticketsBySite[site] = { total: 0, completed: 0 };
+      ticketsBySite[site].total++;
+      if (t.status === 'completed') ticketsBySite[site].completed++;
+    }
+    for (const [jobId, counts] of Object.entries(ticketsBySite)) {
+      const rate = counts.total ? (counts.completed / counts.total * 100) : 100;
+      if (rate < 80 && counts.total >= 10) {
+        attentionItems.push({
+          id: ++taskId,
+          priority: rate < 60 ? 'high' : 'medium',
+          dept: 'operations',
+          description: `${Math.round(rate)}% completion rate — ${jobMap[jobId] || 'Unknown site'}`,
+          detail: `${counts.completed} of ${counts.total} tickets completed`,
+          actionLabel: 'Review',
+        });
+      }
+    }
+
+    // Labor: sites over budget by >10%
+    const laborBySite = {};
+    for (const r of labor) {
+      if (!laborBySite[r.job_id]) laborBySite[r.job_id] = { budget: 0, actual: 0 };
+      laborBySite[r.job_id].budget += r.budget_dollars || 0;
+      laborBySite[r.job_id].actual += r.actual_dollars || 0;
+    }
+    for (const [jobId, totals] of Object.entries(laborBySite)) {
+      if (!totals.budget) continue;
+      const var_pct = (totals.actual - totals.budget) / totals.budget * 100;
+      if (var_pct > 10) {
+        attentionItems.push({
+          id: ++taskId,
+          priority: var_pct > 20 ? 'high' : 'medium',
+          dept: 'labor',
+          description: `Budget +${Math.round(var_pct)}% over — ${jobMap[jobId] || 'Unknown site'}`,
+          detail: `$${Math.round(totals.actual - totals.budget).toLocaleString()} over budget`,
+          actionLabel: 'Review',
+        });
+      }
+    }
+
+    // Quality: sites with high CA ratio
+    const qualBySite = {};
+    for (const r of quality) {
+      if (!qualBySite[r.job_id]) qualBySite[r.job_id] = { audits: 0, cas: 0 };
+      qualBySite[r.job_id].audits += r.audits || 0;
+      qualBySite[r.job_id].cas += r.corrective_actions || 0;
+    }
+    for (const [jobId, totals] of Object.entries(qualBySite)) {
+      if (!totals.audits) continue;
+      const ratio = totals.cas / totals.audits * 100;
+      if (ratio > 40) {
+        attentionItems.push({
+          id: ++taskId,
+          priority: ratio > 60 ? 'high' : 'medium',
+          dept: 'quality',
+          description: `${Math.round(ratio)}% CA ratio — ${jobMap[jobId] || 'Unknown site'}`,
+          detail: `${totals.cas} corrective actions from ${totals.audits} audits`,
+          actionLabel: 'Investigate',
+        });
+      }
+    }
+
+    // Safety: recordable incidents by site
+    const safetyBySite = {};
+    for (const r of safety) {
+      if (!safetyBySite[r.job_id]) safetyBySite[r.job_id] = { recordable: 0 };
+      safetyBySite[r.job_id].recordable += r.recordable_incidents || 0;
+    }
+    for (const [jobId, totals] of Object.entries(safetyBySite)) {
+      if (totals.recordable >= 3) {
+        attentionItems.push({
+          id: ++taskId,
+          priority: 'high',
+          dept: 'safety',
+          description: `${totals.recordable} recordable incidents — ${jobMap[jobId] || 'Unknown site'}`,
+          detail: 'Review safety protocols',
+          actionLabel: 'Investigate',
+        });
+      }
+    }
+
+    // Sort: high first
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    attentionItems.sort((a, b) => (priorityOrder[a.priority] || 2) - (priorityOrder[b.priority] || 2));
+
+    const result = {
+      hero: {
+        totalProperties,
+        totalTickets,
+        openTickets,
+        completionRate,
+        totalBudget,
+        totalActual,
+        laborVariance,
+        recordableIncidents,
+        avgTrir,
+      },
+      domains,
+      attentionItems,
+      hasData: tickets.length > 0 || labor.length > 0 || quality.length > 0,
+    };
+
+    setCache(key, result);
+    res.json(result);
+  } catch (err) {
+    console.error('[dashboards] Home summary error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch home summary' });
+  }
+});
+
 // ─── User Dashboard Config (Per-User Overrides + 3-Tier Resolution) ─────────
 
 const VALID_DASHBOARD_KEYS = ['home', 'operations', 'labor', 'quality', 'timekeeping', 'safety'];
