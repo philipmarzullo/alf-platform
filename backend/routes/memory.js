@@ -20,13 +20,17 @@ const serviceSupabase = createClient(
 
 function requireTenantAccess(req, tenantId) {
   const role = req.user?.role;
-  if (role === 'super-admin' || role === 'platform_owner') return true;
+  // Platform owner can access any tenant
+  if (role === 'platform_owner') return true;
+  // Super-admin and regular users can only access their own tenant
   return req.tenantId === tenantId;
 }
 
-function requireAdmin(req) {
+function requireAdmin(req, tenantId) {
   const role = req.user?.role;
-  return role === 'super-admin' || role === 'platform_owner';
+  if (role === 'platform_owner') return true;
+  // Super-admin can only admin their own tenant
+  return role === 'super-admin' && req.tenantId === tenantId;
 }
 
 const EXTRACTION_PROMPT = `You are an operational memory extractor. Analyze the following content and extract key operational insights that would be valuable for future AI agent interactions with this tenant.
@@ -170,7 +174,7 @@ router.get('/:tenantId', async (req, res) => {
  */
 router.put('/:tenantId/:id', async (req, res) => {
   const { tenantId, id } = req.params;
-  if (!requireTenantAccess(req, tenantId) || !requireAdmin(req)) {
+  if (!requireTenantAccess(req, tenantId) || !requireAdmin(req, tenantId)) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
@@ -208,7 +212,7 @@ router.put('/:tenantId/:id', async (req, res) => {
  */
 router.delete('/:tenantId/:id', async (req, res) => {
   const { tenantId, id } = req.params;
-  if (!requireTenantAccess(req, tenantId) || !requireAdmin(req)) {
+  if (!requireTenantAccess(req, tenantId) || !requireAdmin(req, tenantId)) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 

@@ -37,10 +37,16 @@ function validateTenantId(req, res, next) {
 
 function requirePlatformAdmin(req, res, next) {
   const role = req.user?.role;
-  if (role !== 'super-admin' && role !== 'platform_owner') {
-    return res.status(403).json({ error: 'Platform admin access required' });
-  }
-  next();
+  const userTenantId = req.user?.tenant_id;
+  const targetTenantId = req.params.tenantId;
+
+  // Platform owner can manage any tenant
+  if (role === 'platform_owner') return next();
+
+  // Super-admin can only manage their own tenant
+  if (role === 'super-admin' && userTenantId === targetTenantId) return next();
+
+  return res.status(403).json({ error: 'Platform admin access required' });
 }
 
 function requireTenantAccess(req, res, next) {
@@ -48,10 +54,10 @@ function requireTenantAccess(req, res, next) {
   const userTenantId = req.user?.tenant_id;
   const targetTenantId = req.params.tenantId;
 
-  // Platform admins can access any tenant
-  if (role === 'super-admin' || role === 'platform_owner') return next();
+  // Platform owner can access any tenant
+  if (role === 'platform_owner') return next();
 
-  // Tenant users can only access their own tenant
+  // Super-admin and regular users can only access their own tenant
   if (userTenantId === targetTenantId) return next();
 
   return res.status(403).json({ error: 'Access denied' });
