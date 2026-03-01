@@ -1886,9 +1886,9 @@ router.get('/:tenantId/ops-intelligence', async (req, res) => {
     // Fetch all counts in parallel
     const [agentsRes, sopsRes, automationsRes] = await Promise.all([
       req.supabase
-        .from('alf_agent_definitions')
+        .from('tenant_agents')
         .select('id', { count: 'exact', head: true })
-        .eq('status', 'active'),
+        .eq('tenant_id', effectiveTenantId),
       req.supabase
         .from('sop_analyses')
         .select('id, status')
@@ -1899,13 +1899,8 @@ router.get('/:tenantId/ops-intelligence', async (req, res) => {
         .eq('tenant_id', effectiveTenantId),
     ]);
 
-    // Total agents (platform-wide, all active)
-    const totalAgentsRes = await req.supabase
-      .from('alf_agent_definitions')
-      .select('id', { count: 'exact', head: true });
-
-    const activeAgents = agentsRes.count || 0;
-    const totalAgents = totalAgentsRes.count || 0;
+    const totalAgents = agentsRes.count || 0;
+    const activeAgents = totalAgents;
 
     const sops = sopsRes.data || [];
     const deployedSkills = sops.filter(s => s.status === 'completed').length;

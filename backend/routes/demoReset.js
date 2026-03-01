@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import { DEMO_SLUGS, DEMO_TENANTS } from '../data/demoTenants.js';
 import { seedOperationalData, seedKnowledgeDocs } from '../lib/demoSeed.js';
+import { seedAutomationInsights } from '../lib/seedAutomationData.js';
 
 const router = Router();
 
@@ -20,12 +21,14 @@ const VOLATILE_TABLES = [
   'qbu_intake_data',
   'qbu_photos',
   'qbu_testimonials',
+  'automation_preferences',
   'sop_analyses',
   'dept_automation_roadmaps',
   'automation_actions',
   'tenant_agent_overrides',
   'tenant_memory',
   'tenant_custom_tools',
+  'sync_configs',
 ];
 
 router.post('/:tenantId/demo-reset', async (req, res) => {
@@ -83,6 +86,26 @@ router.post('/:tenantId/demo-reset', async (req, res) => {
     if (tenantDef.knowledgeDocs.length > 0) {
       await seedKnowledgeDocs(req.supabase, tenantId, tenantDef.knowledgeDocs);
     }
+
+    // 4. Restore automation / intelligence data
+    await seedAutomationInsights(req.supabase, tenantId, tenantDef);
+
+    // 5. Restore sync config (suppresses "Connect data source" banner)
+    await req.supabase.from('sync_configs').insert({
+      tenant_id: tenantId,
+      connector_type: 'file_upload',
+      is_active: true,
+      last_sync_at: new Date().toISOString(),
+      last_sync_status: 'success',
+    });
+    await req.supabase.from('tenant_api_credentials').upsert({
+      tenant_id: tenantId,
+      service_type: 'file_upload',
+      credential_label: 'Demo Seed Data',
+      encrypted_key: 'demo_seed_not_a_real_key',
+      key_hint: 'demo****',
+      is_active: true,
+    }, { onConflict: 'tenant_id,service_type' });
 
     console.log(`[demo-reset] Reset complete for ${tenant.company_name}`);
 

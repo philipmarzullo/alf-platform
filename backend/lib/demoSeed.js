@@ -9,6 +9,7 @@
 import { DEMO_TENANTS, DEMO_PASSWORD } from '../data/demoTenants.js';
 import { getTierDefaults } from '../data/tierRegistry.js';
 import { generateFullPortal } from './generateAll.js';
+import { seedAutomationInsights } from './seedAutomationData.js';
 import {
   generateDateDimension,
   generateJobs,
@@ -91,6 +92,12 @@ export async function seedDemoTenants(supabase) {
     if (tenantDef.knowledgeDocs.length > 0) {
       await seedKnowledgeDocs(supabase, tenantId, tenantDef.knowledgeDocs);
     }
+
+    // 2g. Seed automation / intelligence data
+    await seedAutomationInsights(supabase, tenantId, tenantDef);
+
+    // 2h. Seed sync_configs so SyncHealthBanner shows "healthy"
+    await seedSyncConfig(supabase, tenantId);
 
     // Collect credentials
     for (const u of tenantDef.users) {
@@ -329,4 +336,40 @@ export async function seedKnowledgeDocs(supabase, tenantId, knowledgeDocs) {
   if (error) throw new Error(`[seedKnowledgeDocs] insert failed: ${error.message}`);
 
   console.log(`[demo-seed] Knowledge docs: ${docRows.length} inserted`);
+}
+
+// ── Sync config seed (suppresses "Connect data source" banner) ────────
+
+async function seedSyncConfig(supabase, tenantId) {
+  // Delete existing sync_configs for this tenant
+  await supabase.from('sync_configs').delete().eq('tenant_id', tenantId);
+
+  // Insert a demo_seed sync config so the health endpoint returns "healthy"
+  const { error: cfgErr } = await supabase.from('sync_configs').insert({
+    tenant_id: tenantId,
+    connector_type: 'file_upload',
+    is_active: true,
+    last_sync_at: new Date().toISOString(),
+    last_sync_status: 'success',
+  });
+  if (cfgErr) {
+    console.warn(`[demo-seed] sync_configs insert: ${cfgErr.message}`);
+    return;
+  }
+
+  // Insert a matching credential so health check passes the credential check
+  const { error: credErr } = await supabase.from('tenant_api_credentials').upsert({
+    tenant_id: tenantId,
+    service_type: 'file_upload',
+    credential_label: 'Demo Seed Data',
+    encrypted_key: 'demo_seed_not_a_real_key',
+    key_hint: 'demo****',
+    is_active: true,
+  }, { onConflict: 'tenant_id,service_type' });
+  if (credErr) {
+    console.warn(`[demo-seed] tenant_api_credentials upsert: ${credErr.message}`);
+    return;
+  }
+
+  console.log(`[demo-seed] Sync config + credential seeded (demo_seed)`);
 }
