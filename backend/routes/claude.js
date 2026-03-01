@@ -36,13 +36,14 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     .order('doc_type')
     .limit(20);
 
-  if (!docs?.length) return null;
+  let context = '';
 
-  const blocks = docs.map(d =>
-    `--- ${d.doc_type.toUpperCase()}: ${d.file_name} (${d.department}) ---\n${d.extracted_text}`
-  );
-
-  let context = `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+  if (docs?.length) {
+    const blocks = docs.map(d =>
+      `--- ${d.doc_type.toUpperCase()}: ${d.file_name} (${d.department}) ---\n${d.extracted_text}`
+    );
+    context += `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+  }
 
   // Inject active automation skills for this agent
   const { data: skills } = await supabase
@@ -78,7 +79,7 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     console.log(`[claude] Injected ${memories.length} operational memories for ${agentKey}`);
   }
 
-  return context;
+  return context || null;
 }
 
 /**
