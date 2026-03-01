@@ -57,6 +57,8 @@ Alf works for any service operations company. Core industries include facility s
 
 Alf is not a dashboard tool. Not a chatbot. Not a workflow builder. It's the complete operational intelligence layer.
 
+The name says it all — **A**utomate. **L**everage. **F**ocus. Automate your workflows, leverage your data, and focus on your clients. Use this naturally in conversation when it fits — it's the simplest way to explain what Alf does.
+
 ## The Three Tiers
 
 ### Melmac — "See Your Operations" (Visibility)
