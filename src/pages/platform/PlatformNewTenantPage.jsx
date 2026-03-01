@@ -127,32 +127,22 @@ export default function PlatformNewTenantPage() {
       }
     }
 
-    // Create company profile from industry template if selected
+    // If industry template selected: onboard (profile + generate portal) in one step
     if (form.industryTemplate) {
       try {
-        const { data: templateRow } = await supabase
-          .from('industry_templates')
-          .select('template_data')
-          .eq('industry_key', form.industryTemplate)
-          .single();
-
-        if (templateRow?.template_data) {
-          const token = await getFreshToken();
-          await fetch(`${BACKEND_URL}/api/company-profile/${data.id}`, {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...templateRow.template_data,
-              profile_status: 'draft',
-            }),
-          });
-        }
+        const token = await getFreshToken();
+        await fetch(`${BACKEND_URL}/api/tenant-portal/${data.id}/onboard`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ industry_key: form.industryTemplate }),
+        });
       } catch (err) {
-        console.warn('[NewTenant] Industry template apply failed:', err.message);
+        console.warn('[NewTenant] Auto-onboard failed:', err.message);
       }
+      navigate(`/platform/tenants/${data.id}?tab=workspaces`);
+    } else {
+      navigate(`/platform/tenants/${data.id}`);
     }
-
-    navigate(`/platform/tenants/${data.id}`);
   }
 
   return (
@@ -305,7 +295,7 @@ export default function PlatformNewTenantPage() {
             className="flex items-center gap-2 px-5 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
           >
             {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? 'Creating...' : 'Create Tenant'}
+            {saving ? (form.industryTemplate ? 'Creating & generating portal...' : 'Creating...') : 'Create Tenant'}
           </button>
         </div>
       </form>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Save, Loader2, Plus, Trash2, GripVertical, CheckCircle, AlertTriangle,
   ChevronDown, ChevronUp, Building, MapPin, Users, Award, Briefcase,
-  Shield, Cpu, BookOpen, UserCheck,
+  Shield, Cpu, BookOpen, UserCheck, Zap,
 } from 'lucide-react';
 import { getFreshToken } from '../../../lib/supabase';
 
@@ -26,12 +26,14 @@ const EMPTY_DIFFERENTIATOR = { key: '', label: '', description: '' };
 const EMPTY_TECH_PLATFORM = { name: '', description: '' };
 const EMPTY_LEADER = { name: '', title: '' };
 
-export default function CompanyProfileTab({ tenantId }) {
+export default function CompanyProfileTab({ tenantId, hasWorkspaces, onPortalGenerated }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [generationBanner, setGenerationBanner] = useState(null);
   const [expandedSections, setExpandedSections] = useState({
     basic: true,
     departments: true,
@@ -134,8 +136,40 @@ export default function CompanyProfileTab({ tenantId }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to update status');
       setProfile(json.profile);
+
+      // Show banner if auto-generation happened
+      if (json.auto_generated && json.generation_result) {
+        const r = json.generation_result;
+        setGenerationBanner(
+          `Generated ${r.workspaces.length} workspaces, ${r.agents.length} agents, ${r.tools.length} tools, ${r.domains.length} dashboard domains`
+        );
+        onPortalGenerated?.();
+      }
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleGeneratePortal() {
+    setGenerating(true);
+    setError(null);
+    setGenerationBanner(null);
+    try {
+      const token = await getFreshToken();
+      const res = await fetch(`${BACKEND_URL}/api/tenant-portal/${tenantId}/generate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to generate portal');
+      setGenerationBanner(
+        `Generated ${json.workspaces} workspaces, ${json.agents} agents, ${json.tools} tools, ${json.domains} dashboard domains`
+      );
+      onPortalGenerated?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -271,6 +305,12 @@ export default function CompanyProfileTab({ tenantId }) {
           Company profile saved successfully.
         </div>
       )}
+      {generationBanner && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-lg flex items-center gap-2">
+          <Zap size={14} />
+          {generationBanner}
+        </div>
+      )}
 
       {/* Header with status + save */}
       <div className="flex items-center justify-between">
@@ -297,6 +337,16 @@ export default function CompanyProfileTab({ tenantId }) {
             >
               <CheckCircle size={14} />
               Mark Enriched
+            </button>
+          )}
+          {(profile.profile_status === 'confirmed' || profile.profile_status === 'enriched') && !hasWorkspaces && (
+            <button
+              onClick={handleGeneratePortal}
+              disabled={generating}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-alf-orange rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
+            >
+              {generating ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              {generating ? 'Generating...' : 'Generate Portal'}
             </button>
           )}
           <button

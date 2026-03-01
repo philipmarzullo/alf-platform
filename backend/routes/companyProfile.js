@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { generateFullPortal } from '../lib/generateAll.js';
 
 const router = Router();
 
@@ -128,7 +129,28 @@ router.patch('/:tenantId/status', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    return res.json({ profile: data });
+    // Auto-generate portal on first confirmation/enrichment if no workspaces exist
+    let auto_generated = false;
+    let generation_result = null;
+
+    if (profile_status === 'confirmed' || profile_status === 'enriched') {
+      const { count } = await req.supabase
+        .from('tenant_workspaces')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId);
+
+      if ((count || 0) === 0) {
+        try {
+          generation_result = await generateFullPortal(req.supabase, tenantId);
+          auto_generated = true;
+        } catch (genErr) {
+          console.error('[company-profile] auto-generate failed:', genErr.message);
+          // Non-fatal — profile status still updated
+        }
+      }
+    }
+
+    return res.json({ profile: data, auto_generated, generation_result });
   } catch (err) {
     console.error('[company-profile] PATCH status exception:', err.message);
     return res.status(500).json({ error: 'Failed to update profile status' });

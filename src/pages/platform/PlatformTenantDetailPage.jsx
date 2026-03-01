@@ -70,6 +70,8 @@ export default function PlatformTenantDetailPage() {
   const [dashboardStats, setDashboardStats] = useState({ total: 0, open: 0, lastGenerated: null });
   const [profileStatus, setProfileStatus] = useState(null);
   const [hasWorkspaces, setHasWorkspaces] = useState(false);
+  const [hasTools, setHasTools] = useState(false);
+  const [hasDashboardDomains, setHasDashboardDomains] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -99,7 +101,7 @@ export default function PlatformTenantDetailPage() {
   async function loadData() {
     setLoading(true);
 
-    const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes, dashActionsRes, profileRes, wsCountRes] = await Promise.all([
+    const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes, dashActionsRes, profileRes, wsCountRes, toolsCountRes, domainsCountRes] = await Promise.all([
       supabase.from('alf_tenants').select('*').eq('id', id).single(),
       supabase.from('profiles').select('id, name, email, role, active, dashboard_template_id').eq('tenant_id', id).order('name'),
       supabase.from('tenant_sites').select('*').eq('tenant_id', id).order('name'),
@@ -109,6 +111,8 @@ export default function PlatformTenantDetailPage() {
       supabase.from('automation_actions').select('id, status, created_at').eq('tenant_id', id).eq('source', 'dashboard_action_plan').order('created_at', { ascending: false }),
       supabase.from('tenant_company_profiles').select('profile_status').eq('tenant_id', id).maybeSingle(),
       supabase.from('tenant_workspaces').select('id', { count: 'exact', head: true }).eq('tenant_id', id),
+      supabase.from('tenant_tools').select('id', { count: 'exact', head: true }).eq('tenant_id', id),
+      supabase.from('tenant_dashboard_domains').select('id', { count: 'exact', head: true }).eq('tenant_id', id),
     ]);
 
     if (tenantRes.error) {
@@ -147,8 +151,10 @@ export default function PlatformTenantDetailPage() {
     // Company profile status (for Workspaces tab)
     setProfileStatus(profileRes.data?.profile_status || null);
 
-    // Workspace count (for Dynamic Tools tab)
+    // Workspace/tools/domains counts (for downstream tabs)
     setHasWorkspaces((wsCountRes.count || 0) > 0);
+    setHasTools((toolsCountRes.count || 0) > 0);
+    setHasDashboardDomains((domainsCountRes.count || 0) > 0);
 
     setLoading(false);
   }
@@ -389,7 +395,15 @@ export default function PlatformTenantDetailPage() {
 
       {/* Company Profile Tab */}
       {activeTab === 'company-profile' && (
-        <CompanyProfileTab tenantId={id} />
+        <CompanyProfileTab
+          tenantId={id}
+          hasWorkspaces={hasWorkspaces}
+          onPortalGenerated={() => {
+            setHasWorkspaces(true);
+            setHasTools(true);
+            setHasDashboardDomains(true);
+          }}
+        />
       )}
 
       {/* Workspaces Tab */}
