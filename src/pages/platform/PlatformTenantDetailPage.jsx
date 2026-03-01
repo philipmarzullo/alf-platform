@@ -14,6 +14,7 @@ import TenantOverviewTab from './tabs/TenantOverviewTab';
 import CompanyProfileTab from './tabs/CompanyProfileTab';
 import WorkspacesTab from './tabs/WorkspacesTab';
 import ToolsTab from './tabs/ToolsTab';
+import DashboardDomainsTab from './tabs/DashboardDomainsTab';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
@@ -37,6 +38,7 @@ const TABS = [
   { key: 'company-profile', label: 'Company Profile', icon: Building },
   { key: 'workspaces', label: 'Workspaces', icon: LayoutGrid },
   { key: 'dynamic-tools', label: 'Dynamic Tools', icon: Hammer },
+  { key: 'dynamic-dashboards', label: 'Dynamic Dashboards', icon: BarChart3 },
   { key: 'features', label: 'Features', icon: Puzzle },
   { key: 'agents', label: 'Agents', icon: Bot },
   { key: 'api-keys', label: 'API Keys', icon: Lock },
@@ -398,6 +400,11 @@ export default function PlatformTenantDetailPage() {
       {/* Dynamic Tools Tab */}
       {activeTab === 'dynamic-tools' && (
         <ToolsTab tenantId={id} profileStatus={profileStatus} hasWorkspaces={hasWorkspaces} />
+      )}
+
+      {/* Dynamic Dashboards Tab */}
+      {activeTab === 'dynamic-dashboards' && (
+        <DashboardDomainsTab tenantId={id} profileStatus={profileStatus} hasWorkspaces={hasWorkspaces} />
       )}
 
       {/* Features Tab */}

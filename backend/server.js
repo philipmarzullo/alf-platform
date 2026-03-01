@@ -15,6 +15,7 @@ import automationPreferencesRouter from './routes/automationPreferences.js';
 import companyProfileRouter from './routes/companyProfile.js';
 import tenantWorkspacesRouter from './routes/tenantWorkspaces.js';
 import tenantToolsRouter from './routes/tenantTools.js';
+import tenantDashboardDomainsRouter from './routes/tenantDashboardDomains.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -69,6 +70,7 @@ app.use('/api/automation-preferences', auth, automationPreferencesRouter);
 app.use('/api/company-profile', auth, companyProfileRouter);
 app.use('/api/tenant-workspaces', auth, tenantWorkspacesRouter);
 app.use('/api/tenant-tools', auth, tenantToolsRouter);
+app.use('/api/tenant-dashboard-domains', auth, tenantDashboardDomainsRouter);
 
 // --- 404 ---
 app.use((req, res) => {
