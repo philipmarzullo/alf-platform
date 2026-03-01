@@ -6,13 +6,14 @@ import {
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
   Plus, Mail, Palette, RefreshCw, ChevronRight, BarChart3,
-  GripVertical, Download, HardDrive, AlertTriangle, Wrench, Settings2, Star, X, Building, LayoutGrid,
+  GripVertical, Download, HardDrive, AlertTriangle, Wrench, Settings2, Star, X, Building, LayoutGrid, Hammer,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
 import TenantOverviewTab from './tabs/TenantOverviewTab';
 import CompanyProfileTab from './tabs/CompanyProfileTab';
 import WorkspacesTab from './tabs/WorkspacesTab';
+import ToolsTab from './tabs/ToolsTab';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
@@ -35,6 +36,7 @@ const TABS = [
   { key: 'overview', label: 'Overview', icon: Activity },
   { key: 'company-profile', label: 'Company Profile', icon: Building },
   { key: 'workspaces', label: 'Workspaces', icon: LayoutGrid },
+  { key: 'dynamic-tools', label: 'Dynamic Tools', icon: Hammer },
   { key: 'features', label: 'Features', icon: Puzzle },
   { key: 'agents', label: 'Agents', icon: Bot },
   { key: 'api-keys', label: 'API Keys', icon: Lock },
@@ -65,6 +67,7 @@ export default function PlatformTenantDetailPage() {
   const [dbAgents, setDbAgents] = useState([]);
   const [dashboardStats, setDashboardStats] = useState({ total: 0, open: 0, lastGenerated: null });
   const [profileStatus, setProfileStatus] = useState(null);
+  const [hasWorkspaces, setHasWorkspaces] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -94,7 +97,7 @@ export default function PlatformTenantDetailPage() {
   async function loadData() {
     setLoading(true);
 
-    const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes, dashActionsRes, profileRes] = await Promise.all([
+    const [tenantRes, usersRes, sitesRes, usageRes, overridesRes, dbAgentsRes, dashActionsRes, profileRes, wsCountRes] = await Promise.all([
       supabase.from('alf_tenants').select('*').eq('id', id).single(),
       supabase.from('profiles').select('id, name, email, role, active, dashboard_template_id').eq('tenant_id', id).order('name'),
       supabase.from('tenant_sites').select('*').eq('tenant_id', id).order('name'),
@@ -103,6 +106,7 @@ export default function PlatformTenantDetailPage() {
       supabase.from('alf_agent_definitions').select('*').order('agent_key'),
       supabase.from('automation_actions').select('id, status, created_at').eq('tenant_id', id).eq('source', 'dashboard_action_plan').order('created_at', { ascending: false }),
       supabase.from('tenant_company_profiles').select('profile_status').eq('tenant_id', id).maybeSingle(),
+      supabase.from('tenant_workspaces').select('id', { count: 'exact', head: true }).eq('tenant_id', id),
     ]);
 
     if (tenantRes.error) {
@@ -140,6 +144,9 @@ export default function PlatformTenantDetailPage() {
 
     // Company profile status (for Workspaces tab)
     setProfileStatus(profileRes.data?.profile_status || null);
+
+    // Workspace count (for Dynamic Tools tab)
+    setHasWorkspaces((wsCountRes.count || 0) > 0);
 
     setLoading(false);
   }
@@ -386,6 +393,11 @@ export default function PlatformTenantDetailPage() {
       {/* Workspaces Tab */}
       {activeTab === 'workspaces' && (
         <WorkspacesTab tenantId={id} profileStatus={profileStatus} />
+      )}
+
+      {/* Dynamic Tools Tab */}
+      {activeTab === 'dynamic-tools' && (
+        <ToolsTab tenantId={id} profileStatus={profileStatus} hasWorkspaces={hasWorkspaces} />
       )}
 
       {/* Features Tab */}

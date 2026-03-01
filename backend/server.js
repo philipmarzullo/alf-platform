@@ -14,6 +14,7 @@ import oauthRouter from './routes/oauth.js';
 import automationPreferencesRouter from './routes/automationPreferences.js';
 import companyProfileRouter from './routes/companyProfile.js';
 import tenantWorkspacesRouter from './routes/tenantWorkspaces.js';
+import tenantToolsRouter from './routes/tenantTools.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -67,6 +68,7 @@ app.use('/api/sync', auth, syncRouter);
 app.use('/api/automation-preferences', auth, automationPreferencesRouter);
 app.use('/api/company-profile', auth, companyProfileRouter);
 app.use('/api/tenant-workspaces', auth, tenantWorkspacesRouter);
+app.use('/api/tenant-tools', auth, tenantToolsRouter);
 
 // --- 404 ---
 app.use((req, res) => {

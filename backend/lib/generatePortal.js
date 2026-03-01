@@ -9,7 +9,7 @@
 
 // ─── Prompt builders (internal) ─────────────────────────
 
-function buildCompanyContext(profile, companyName) {
+export function buildCompanyContext(profile, companyName) {
   const parts = [`Company: ${companyName}`];
 
   if (profile.industry) parts.push(`Industry: ${profile.industry}`);
@@ -45,7 +45,7 @@ function buildCompanyContext(profile, companyName) {
   return parts.join('\n');
 }
 
-function buildSharedRules(companyName) {
+export function buildSharedRules(companyName) {
   return `Rules that apply to ALL ${companyName} agents:
 - Tone: Professional, warm, operationally specific.
 - Never fabricate data, metrics, employee information, pay rates, or compliance determinations.
