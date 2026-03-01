@@ -1,6 +1,6 @@
 # Alf Platform — Identity, Value, and Intelligence Framework
 
-> **Version:** 2.1 — February 28, 2026
+> **Version:** 2.0 — February 28, 2026
 > **Author:** Philip Marzullo, Founder
 > **Purpose:** This is Alf's complete identity document. Every product decision, every agent behavior, every tenant interaction, every sales conversation, and every line of code should align with what's written here.
 
@@ -8,11 +8,11 @@
 
 ## 1. What Alf Is
 
-Alf is an operational intelligence platform purpose-built for facility services companies. Alf connects to a company's operational data, deploys AI agents that understand their specific workflows, and progressively automates their operations — from visibility to intelligence to full automation.
+Alf is an operational intelligence platform that transforms how companies run their operations. While purpose-built with deep expertise in facility services, Alf's architecture is industry-agnostic — it learns about each company through onboarding, adapts its workspaces, agents, tools, and dashboards to that company's actual structure, and progressively automates their operations from visibility to intelligence to full automation.
 
 Alf is not a dashboard tool. Alf is not a chatbot. Alf is not a workflow builder.
 
-Alf is the operating system that sits between a facility services company's data and their daily decisions. It sees everything, understands the context, and — when the company is ready — acts on their behalf.
+Alf is the operating system that sits between a company's operational data and their daily decisions. It sees everything, understands the context, and — when the company is ready — acts on their behalf.
 
 ---
 
@@ -31,7 +31,7 @@ Alf delivers value at three levels. Each builds on the one below. Each maps to a
 Connect your operational data sources. See your entire operation in one place. Everyone sees exactly what they need — nothing more, nothing less.
 
 - **Command Center** — Single-screen operational snapshot. Hero metrics, workspace health cards, threshold-based alerts.
-- **5 Domain Dashboards** — Operations, Labor, Quality, Timekeeping, Safety. Each with KPIs, charts, trend lines, and site-level breakdowns.
+- **Domain Dashboards** — Generated from the company profile during onboarding. A facility services company might get Operations, Labor, Quality, Timekeeping, Safety. A logistics company might get Fleet, Routes, Warehouse, Compliance. Each with KPIs, charts, trend lines, and site-level breakdowns.
 - **RBAC-filtered views** — Three metric tiers (operational, managerial, financial) ensure the right people see the right data. Site scoping filters by location. Module access controls workspace visibility.
 - **Dashboard customization** — Drag-and-drop widget reordering, visibility toggles, dashboard sharing between users.
 - **Data ingestion** — Snowflake connector, file upload (CSV/Excel), future CMMS and ERP connectors.
@@ -74,11 +74,11 @@ Every time a Melmac user looks at their dashboard and thinks "what does this mea
 
 Everything in Melmac, plus AI agents that live inside each workspace — interpreting data, answering questions, generating documents, surfacing patterns, and recommending specific actions with evidence.
 
-- **14 AI Agents** — Department-specific agents for HR, Finance, Purchasing, Sales, Operations, plus document generation agents for QBUs, proposals, transition plans, budgets, incident reports, and training plans.
-- **Workspace Actions** — Named operations within each workspace. The HR Agent has 9 actions (draft reminders, check compliance, run audits). The Sales Agent has 5. Each action produces targeted, contextual output.
+- **Workspace Agents** — Each workspace generated from the company profile gets its own AI agent, configured with that department's context and enriched by the tenant's Knowledge Base. A facility services company's Operations Agent knows custodial SOPs. A logistics company's Fleet Agent knows route optimization procedures. Agents are spawned during onboarding, not hardcoded.
+- **Workspace Actions** — Named operations within each workspace. Each agent has actions relevant to its department. Actions produce targeted, contextual output based on the company profile and knowledge base.
 - **Knowledge Base** — Upload SOPs, policies, training manuals, union agreements. Documents are extracted and injected into the relevant agent's context at call time. The HR Agent at Company A knows Company A's enrollment process. The HR Agent at Company B knows Company B's. Same platform, different intelligence.
 - **Action Plans** — AI-generated prioritized actions from dashboard data snapshots. 5-7 items per generation with evidence, recommendations, priority, and suggested owner. Tracked through open → in_progress → completed/dismissed.
-- **6 Built-in Tools** — QBU Builder (16-slide branded decks), Proposal Builder (9-slide prospect decks), Transition Plan, Budget, Incident Report, Training Plan. Each output is branded, governed by claim rules, and enriched by the knowledge base.
+- **Tools** — Generated based on the company profile. Every tenant gets a Proposal Builder with their own service catalog and differentiators. Additional tools (QBU Builder, Incident Report, Training Plan, Budget, Transition Plan) are activated based on what's relevant to the company's operations. Each output is branded, governed by claim rules, and enriched by the knowledge base.
 - **Custom Tool Builder** — Tenant admins create their own AI-powered document generators. Define fields, set purpose, and the agent builds the tool's intelligence automatically.
 - **Analytics Chat** — Conversational interface for ad-hoc data questions.
 
@@ -132,7 +132,7 @@ Everything in Orbit, plus Alf reads the company's SOPs and operational patterns,
 - **Connected Execution** — Microsoft 365, Google Workspace, CMMS integrations. Agents don't just draft — they send emails, create calendar events, post to Teams, update work orders. All from the tenant's own accounts.
 - **Automation Management** — Proposed / Active / History views. The tenant reviews proposals, monitors active flows, and sees execution history.
 - **Risk-Calibrated Recommendations** — Every flow gets a risk classification. Low risk (internal notifications): recommended auto. Medium risk (internal emails): recommended review-then-auto. High risk (external client communication): recommended always-review.
-- **Full Workspace Suite** — HR, Finance, Purchasing, Sales, Operations workspaces with all actions enabled.
+- **Full Workspace Suite** — All workspaces generated from the company profile, with all agent actions enabled.
 
 #### What it replaces
 
@@ -233,17 +233,17 @@ This is by design.
 | **Tagline** | Visibility | Intelligence | Automation |
 | **Max users** | 10 | 25 | 100 |
 | **Max agent calls/mo** | 1,000 | 5,000 | 25,000 |
-| **Dashboards** | ✓ Command Center + 5 domains | ✓ | ✓ |
+| **Dashboards** | ✓ Command Center + domain dashboards | ✓ | ✓ |
 | **RBAC & site scoping** | ✓ | ✓ | ✓ |
 | **Dashboard customization** | ✓ | ✓ | ✓ |
 | **Data connectors** | ✓ Snowflake, file upload | ✓ | ✓ + outbound integrations |
-| **AI Agents** | — | ✓ 14 agents | ✓ 14 agents + spawned skills |
+| **AI Agents** | — | ✓ Per-workspace agents | ✓ Per-workspace agents + spawned skills |
 | **Knowledge Base** | — | ✓ | ✓ |
 | **Action Plans** | — | ✓ | ✓ + flow triggers |
-| **Built-in Tools** | — | ✓ 6 tools | ✓ 6 tools + scheduled generation |
+| **Tools** | — | ✓ Profile-generated + custom | ✓ Profile-generated + custom + scheduled |
 | **Custom Tool Builder** | — | ✓ | ✓ |
 | **Analytics Chat** | — | ✓ | ✓ |
-| **Workspaces (HR, Finance, etc.)** | — | — | ✓ full suite |
+| **Workspaces** | — | — | ✓ Full suite from company profile |
 | **SOP Analysis** | — | — | ✓ |
 | **Automation Flows** | — | — | ✓ |
 | **Agent Spawning** | — | — | ✓ |
@@ -260,12 +260,10 @@ This is by design.
 | tools | — | ✓ | ✓ |
 | actionPlans | — | ✓ | ✓ |
 | knowledge | — | ✓ | ✓ |
-| hr | — | — | ✓ |
-| finance | — | — | ✓ |
-| purchasing | — | — | ✓ |
-| sales | — | — | ✓ |
-| ops | — | — | ✓ |
+| workspaces (all from profile) | — | — | ✓ |
 | automation | — | — | ✓ |
+
+Note: Workspace module keys are dynamic — generated from `tenant_company_profiles.departments`, not hardcoded. A facility services tenant might have `ops`, `hr`, `finance`, `sales`, `safety`. A logistics tenant might have `fleet`, `dispatch`, `warehouse`, `hr`, `finance`. The tier controls whether workspaces are available at all, not which specific workspaces exist.
 
 ### Pricing Philosophy
 
@@ -296,6 +294,22 @@ These are moments the product creates that naturally lead to upgrade conversatio
 
 ## 4. Agent Architecture
 
+### Workspace Agents
+
+Agents are not hardcoded. They are generated from the tenant's company profile during onboarding:
+
+**Per-workspace agents** — One agent per department defined in the company profile. Each gets a system prompt generated from the department context + company profile + knowledge base documents. Examples:
+- A facility services company with an Operations department → Operations Agent (custodial, maintenance, grounds context)
+- A logistics company with a Fleet department → Fleet Agent (vehicle management, route optimization context)
+- Any company with HR → HR Agent (configured for that company's specific workforce model)
+
+**Cross-functional agents** — Generated for every tenant regardless of profile:
+- Admin Agent — general support and system guidance
+- Analytics Agent — conversational data Q&A across all dashboard domains
+
+**Tool agents** — Generated based on which tools are activated for the tenant:
+- Proposal Builder Agent, QBU Builder Agent, etc. — configured with the company's service catalog, differentiators, and voice from the knowledge base
+
 ### Agent Identity
 
 Every agent in Alf has:
@@ -309,13 +323,14 @@ Every agent in Alf has:
 ### Knowledge Injection Pipeline
 
 When an agent is called:
-1. Map agent to departments (HR Agent → hr, Admin Agent → admin + general)
-2. Fetch extracted documents from `tenant_documents` where department matches
+1. Map agent to its workspace via `tenant_agents.workspace_id` → `tenant_workspaces.department_key`
+2. Fetch extracted documents from `tenant_documents` where department matches the workspace's department_key
 3. Fetch active automation skills from `automation_actions` where agent_key matches
-4. Append both to the system prompt as structured context blocks
-5. Execute the call with full tenant-specific intelligence
+4. Inject the tenant's company profile summary (from `tenant_company_profiles`) as baseline context
+5. Append all context to the system prompt as structured blocks
+6. Execute the call with full tenant-specific intelligence
 
-This means two tenants calling the same agent with the same action get different results — because their knowledge base is different. That's the moat.
+This means two tenants calling the same type of agent (e.g., both have an "Operations Agent") get different results — because their company profile, knowledge base, and operational context are different. That's the moat.
 
 ### Agent Spawning Mechanics
 
@@ -565,38 +580,45 @@ Both run on the same platform. The difference is who drives the onboarding and c
 
 ## 9. Onboarding Journey
 
+> **Full onboarding architecture is defined in `ALF-DYNAMIC-ARCHITECTURE.md`.** This section provides the summary.
+
+### Phase 0: Company Discovery (All Tiers)
+
+1. Tenant created in Alf (tier, branding, optional industry template)
+2. **Company Discovery** — structured intake via onboarding agent, document upload, or manual entry. Alf learns: industry, departments, services, differentiators, technology stack, leadership, geographic coverage.
+3. Company profile generated and confirmed by tenant super-admin
+4. **Portal generated from profile** — workspaces, agents, tools, dashboard domains are created dynamically based on what the company actually has. No hardcoded assumptions.
+5. Users provisioned with roles, site assignments, dashboard templates
+
 ### Phase 1: See Your Operations (Level 1 → Melmac)
 
-1. Tenant created in Alf (tier, modules, branding)
-2. Users provisioned with roles, site assignments, dashboard templates
-3. Data source connected (Snowflake, file upload, or guided setup)
-4. Data flows into Alf's normalized schema
-5. Dashboards go live — the tenant can see their operations
-6. **Value delivered:** Real-time operational visibility across all sites
+6. Data source connected (Snowflake, file upload, or guided setup)
+7. Data flows into Alf's normalized schema
+8. Dashboard domains (generated from profile) light up with real data
+9. **Value delivered:** Real-time operational visibility across all sites, organized by the company's actual departments
 
 ### Phase 2: Get Intelligent Help (Level 2 → Orbit)
 
-7. Tier upgraded — agents, tools, knowledge base, action plans unlock
-8. Tenant uploads SOPs, policies, training materials to Knowledge Base
-9. Agents gain tenant-specific context via knowledge injection
-10. Workspace actions produce relevant, informed outputs
-11. Action Plans start generating — AI-driven prioritization from dashboard data
-12. Tools produce branded documents — QBUs, proposals, reports
-13. Custom tools created for tenant-specific workflows
-14. **Value delivered:** AI team that knows the tenant's operations and produces real work product
+10. Tier upgraded — workspace agents, tools, knowledge base, action plans unlock
+11. **Operational Knowledge Upload** — tenant uploads SOPs, policies, training materials, previous deliverables to Knowledge Base. This is critical — SOPs are the raw material for agent intelligence and automation discovery.
+12. Workspace agents gain tenant-specific context via knowledge injection
+13. Tools produce branded documents using the company's voice and profile data
+14. Action Plans start generating — AI-driven prioritization from dashboard data
+15. **Value delivered:** AI team that knows this company's specific operations and produces real work product
 
 ### Phase 3: Automate Your Operations (Level 3 → Galaxy)
 
-15. Tier upgraded — workspaces, automation, SOP analysis, connected execution unlock
-16. SOP analysis runs across all uploaded documents
-17. Department automation roadmaps generated
-18. Flow proposals presented in Automation Management
-19. Tenant reviews, customizes, and approves flows
-20. Outbound integrations connected (Microsoft 365, CMMS)
-21. Approved flows activated — scheduled, triggered, or event-driven
-22. Monitoring begins — execution tracking, success rates, improvement suggestions
-23. Pattern-driven and data-driven discovery proposes additional flows over time
-24. **Value delivered:** Operations that run themselves, getting smarter every month
+16. Tier upgraded — full workspaces, automation, SOP analysis, connected execution unlock
+17. SOP analysis runs across all uploaded documents — identifies automation candidates
+18. Department automation roadmaps generated
+19. Flow proposals presented in Automation Management
+20. Tenant reviews, customizes, and approves flows
+21. Outbound integrations connected (Microsoft 365, CMMS)
+22. Approved flows activated — scheduled, triggered, or event-driven
+23. Monitoring begins — execution tracking, success rates, improvement suggestions
+24. Pattern-driven and data-driven discovery proposes additional flows over time
+25. Custom builds extend the dynamically generated portal for tenant-specific needs
+26. **Value delivered:** Operations that run themselves, getting smarter every month
 
 ---
 
@@ -612,10 +634,12 @@ Both run on the same platform. The difference is who drives the onboarding and c
 
 ### Where Alf is different
 
-No platform in the facility services market does all three:
+No platform does all three:
 1. Connects operational data and provides role-filtered visibility (like BI tools)
 2. Deploys AI agents that understand the specific tenant's operations (like a smart consultant)
 3. Reads SOPs and designs automation flows that execute through connected services (like a workflow engine with a brain)
+
+Alf's architecture is industry-agnostic — it learns about each company and adapts. But its deepest expertise is in facility services, where it has proven deployment experience across custodial, grounds, MEP, and integrated FM operations. This vertical depth is where Alf wins today. The horizontal architecture is where it scales tomorrow.
 
 The closest analog is not a software product. It's hiring an operations consultant who also happens to be a software engineer. Alf replaces that person — and scales across every tenant without adding headcount.
 
