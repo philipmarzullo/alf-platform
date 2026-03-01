@@ -1,10 +1,18 @@
 import { Router } from 'express';
+import { createClient } from '@supabase/supabase-js';
+import { getPlatformApiKey } from './platformCredentials.js';
 
 const router = Router();
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const MODEL = 'claude-sonnet-4-20250514';
+
+// Service-level Supabase client for reading platform credentials
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 // IP-based rate limiting for public endpoint
 const ipCounts = new Map();
@@ -121,9 +129,17 @@ router.post('/', publicRateLimit, async (req, res) => {
     return res.status(400).json({ error: 'Missing required field: messages' });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // Resolve API key: platform DB first, then env fallback
+  let apiKey;
+  try {
+    apiKey = await getPlatformApiKey(supabase, 'anthropic');
+  } catch (err) {
+    console.error('[sales-chat] Platform key lookup failed:', err.message);
+  }
+  if (!apiKey) apiKey = process.env.ANTHROPIC_API_KEY;
+
   if (!apiKey) {
-    console.error('[sales-chat] No ANTHROPIC_API_KEY configured');
+    console.error('[sales-chat] No API key — neither platform DB nor env var');
     return res.status(503).json({ error: 'AI service not configured' });
   }
 
