@@ -17,6 +17,7 @@ import tenantWorkspacesRouter from './routes/tenantWorkspaces.js';
 import tenantToolsRouter from './routes/tenantTools.js';
 import tenantDashboardDomainsRouter from './routes/tenantDashboardDomains.js';
 import tenantPortalRouter from './routes/tenantPortal.js';
+import salesChatRouter from './routes/salesChat.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -57,6 +58,9 @@ app.use('/api/oauth', oauthRouter);
 
 // --- Scheduled backup cron (no auth — protected by CRON_SECRET) ---
 app.post('/api/backup/cron/daily-export', handleScheduledExport);
+
+// --- Public API routes (no auth) ---
+app.use('/api/sales-chat', salesChatRouter);
 
 // --- Authenticated routes ---
 app.use('/api/claude', auth, claudeRouter);
