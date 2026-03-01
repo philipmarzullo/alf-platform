@@ -6,11 +6,12 @@ import {
   FileText, BookOpen, Upload, ChevronUp, ChevronDown,
   Key, Trash2, CheckCircle, XCircle, Eye, EyeOff, FlaskConical, Zap,
   Plus, Mail, Palette, RefreshCw, ChevronRight, BarChart3,
-  GripVertical, Download, HardDrive, AlertTriangle, Wrench, Settings2, Star, X,
+  GripVertical, Download, HardDrive, AlertTriangle, Wrench, Settings2, Star, X, Building,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import DataTable from '../../components/shared/DataTable';
 import TenantOverviewTab from './tabs/TenantOverviewTab';
+import CompanyProfileTab from './tabs/CompanyProfileTab';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
@@ -31,6 +32,7 @@ const AGENT_MODULE_MAP = {
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: Activity },
+  { key: 'company-profile', label: 'Company Profile', icon: Building },
   { key: 'features', label: 'Features', icon: Puzzle },
   { key: 'agents', label: 'Agents', icon: Bot },
   { key: 'api-keys', label: 'API Keys', icon: Lock },
@@ -367,6 +369,11 @@ export default function PlatformTenantDetailPage() {
           saved={saved}
           setSaved={setSaved}
         />
+      )}
+
+      {/* Company Profile Tab */}
+      {activeTab === 'company-profile' && (
+        <CompanyProfileTab tenantId={id} />
       )}
 
       {/* Features Tab */}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
@@ -26,10 +26,24 @@ export default function PlatformNewTenantPage() {
       max_users: defaults.maxUsers,
       max_agents: 10,
       dashboardTemplate: 'default',
+      industryTemplate: '',
     };
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [industryTemplates, setIndustryTemplates] = useState([]);
+
+  useEffect(() => {
+    loadTemplates();
+  }, []);
+
+  async function loadTemplates() {
+    const { data } = await supabase
+      .from('industry_templates')
+      .select('id, industry_key, name, description')
+      .order('name');
+    setIndustryTemplates(data || []);
+  }
 
   function handleNameChange(name) {
     setForm({ ...form, company_name: name, slug: slugify(name) });
@@ -113,6 +127,31 @@ export default function PlatformNewTenantPage() {
       }
     }
 
+    // Create company profile from industry template if selected
+    if (form.industryTemplate) {
+      try {
+        const { data: templateRow } = await supabase
+          .from('industry_templates')
+          .select('template_data')
+          .eq('industry_key', form.industryTemplate)
+          .single();
+
+        if (templateRow?.template_data) {
+          const token = await getFreshToken();
+          await fetch(`${BACKEND_URL}/api/company-profile/${data.id}`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...templateRow.template_data,
+              profile_status: 'draft',
+            }),
+          });
+        }
+      } catch (err) {
+        console.warn('[NewTenant] Industry template apply failed:', err.message);
+      }
+    }
+
     navigate(`/platform/tenants/${data.id}`);
   }
 
@@ -172,6 +211,24 @@ export default function PlatformNewTenantPage() {
               ))}
             </select>
             <p className="text-xs text-secondary-text mt-1">{TIER_REGISTRY[form.plan]?.description}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-dark-text mb-1">Start from Template</label>
+            <select
+              value={form.industryTemplate}
+              onChange={(e) => setForm({ ...form, industryTemplate: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange"
+            >
+              <option value="">No template — blank profile</option>
+              {industryTemplates.map((t) => (
+                <option key={t.industry_key} value={t.industry_key}>{t.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-secondary-text mt-1">
+              {form.industryTemplate
+                ? industryTemplates.find((t) => t.industry_key === form.industryTemplate)?.description || ''
+                : 'Pre-populates the company profile with industry-specific departments, services, and differentiators.'}
+            </p>
           </div>
         </div>
 
