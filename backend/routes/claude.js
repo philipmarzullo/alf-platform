@@ -7,6 +7,44 @@ const router = Router();
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 
+// ──────────────────────────────────────────────
+// Tenant limits cache (monthly usage enforcement)
+// ──────────────────────────────────────────────
+
+const tenantLimitsCache = new Map(); // tenantId → { maxCalls, isActive, fetchedAt }
+const LIMITS_CACHE_TTL = 5 * 60 * 1000; // 5 min
+
+async function getTenantLimits(supabase, tenantId) {
+  const cached = tenantLimitsCache.get(tenantId);
+  if (cached && Date.now() - cached.fetchedAt < LIMITS_CACHE_TTL) {
+    return cached;
+  }
+
+  const { data, error } = await supabase
+    .from('alf_tenants')
+    .select('max_agent_calls_per_month, is_active')
+    .eq('id', tenantId)
+    .single();
+
+  if (error || !data) {
+    console.warn(`[claude] Tenant limits lookup failed for ${tenantId}:`, error?.message);
+    return null;
+  }
+
+  const limits = {
+    maxCalls: data.max_agent_calls_per_month,
+    isActive: data.is_active,
+    fetchedAt: Date.now(),
+  };
+  tenantLimitsCache.set(tenantId, limits);
+  return limits;
+}
+
+/** Called by subscription.js on plan change to force re-fetch. */
+export function invalidateTenantCache(tenantId) {
+  tenantLimitsCache.delete(tenantId);
+}
+
 // Maps agent keys to departments for knowledge injection
 const AGENT_DEPT_MAP = {
   hr: ['hr'],
@@ -105,6 +143,37 @@ router.post('/', rateLimit, async (req, res) => {
   } catch (err) {
     console.error(`[claude] No API key — tenant: ${req.tenantId || 'platform'}`);
     return res.status(err.status || 403).json({ error: err.message });
+  }
+
+  // ── Monthly usage enforcement ──
+  if (effectiveTenantId) {
+    const limits = await getTenantLimits(req.supabase, effectiveTenantId);
+
+    if (limits && !limits.isActive) {
+      return res.status(403).json({ error: 'Subscription inactive' });
+    }
+
+    if (limits && limits.maxCalls) {
+      const now = new Date();
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const resetsAt = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+      const { count, error: countErr } = await req.supabase
+        .from('alf_usage_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', effectiveTenantId)
+        .eq('action', 'agent_call')
+        .gte('created_at', firstOfMonth);
+
+      if (!countErr && count >= limits.maxCalls) {
+        return res.status(429).json({
+          error: 'Monthly agent call limit reached',
+          limit: limits.maxCalls,
+          used: count,
+          resets_at: resetsAt,
+        });
+      }
+    }
   }
 
   try {
