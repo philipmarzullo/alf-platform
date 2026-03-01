@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
+import { extractMemories } from './memory.js';
 
 const router = Router();
 
@@ -354,6 +355,9 @@ router.post('/:tenantId/:toolId/generate', async (req, res) => {
       });
 
     res.json({ text: resultText });
+
+    // Fire-and-forget memory extraction from tool output
+    extractMemories(tenantId, resultText, 'tool_output', null, tool.department || 'general');
   } catch (err) {
     console.error('[customTools] Generate failed:', err.message);
     res.status(500).json({ error: 'Generation failed' });

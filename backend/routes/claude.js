@@ -60,6 +60,24 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     console.log(`[claude] Injected ${skills.length} automation skill(s) for ${agentKey}`);
   }
 
+  // Fetch tenant operational memory
+  const depts = [...departments, 'general'];
+  const { data: memories } = await supabase
+    .from('tenant_memory')
+    .select('content, memory_type, department')
+    .eq('tenant_id', tenantId)
+    .in('department', depts)
+    .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
+    .order('relevance_score', { ascending: false })
+    .limit(10);
+
+  if (memories?.length) {
+    context += '\n\n=== TENANT OPERATIONAL MEMORY ===\n';
+    context += 'Key operational insights about this tenant:\n\n';
+    context += memories.map(m => `- [${m.memory_type}] ${m.content}`).join('\n');
+    console.log(`[claude] Injected ${memories.length} operational memories for ${agentKey}`);
+  }
+
   return context;
 }
 

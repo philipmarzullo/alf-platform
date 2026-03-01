@@ -19,6 +19,7 @@ import tenantDashboardDomainsRouter from './routes/tenantDashboardDomains.js';
 import tenantPortalRouter from './routes/tenantPortal.js';
 import salesChatRouter from './routes/salesChat.js';
 import demoRequestRouter from './routes/demoRequest.js';
+import memoryRouter from './routes/memory.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -79,6 +80,7 @@ app.use('/api/tenant-workspaces', auth, tenantWorkspacesRouter);
 app.use('/api/tenant-tools', auth, tenantToolsRouter);
 app.use('/api/tenant-dashboard-domains', auth, tenantDashboardDomainsRouter);
 app.use('/api/tenant-portal', auth, tenantPortalRouter);
+app.use('/api/memory', auth, memoryRouter);
 
 // --- 404 ---
 app.use((req, res) => {

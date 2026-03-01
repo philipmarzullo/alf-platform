@@ -3,6 +3,7 @@ import rateLimit from '../middleware/rateLimit.js';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
 import { getUserScopedJobIds, intersectJobIds } from '../lib/scopedJobs.js';
 import { getUserTemplate } from '../lib/userTemplate.js';
+import { extractMemories } from './memory.js';
 
 const router = Router();
 
@@ -448,6 +449,9 @@ router.post('/:tenantId/action-plan', rateLimit, async (req, res) => {
       });
 
     res.json({ summary: plan.summary, actions: insertedActions });
+
+    // Fire-and-forget memory extraction from action plan
+    extractMemories(effectiveTenantId, plan.summary, 'action_plan', null, 'ops');
   } catch (err) {
     console.error('[dashboards] Action plan generation failed:', err.message);
     res.status(502).json({ error: 'Action plan generation failed: ' + err.message });
