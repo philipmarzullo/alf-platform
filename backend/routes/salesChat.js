@@ -62,7 +62,7 @@ Alf is not a dashboard tool. Not a chatbot. Not a workflow builder. It's the com
 ### Melmac — "See Your Operations" (Visibility)
 - Command Center Dashboard — single-screen operational snapshot
 - 5 Domain Dashboards — Operations, Labor, Quality, Timekeeping, Safety
-- RBAC-filtered views — right people see right data
+- Role-based filtered views — right people see right data
 - Dashboard customization and sharing
 - Data connectors — Snowflake, CSV/Excel uploads, CMMS
 - Up to 10 users, 1,000 agent calls/month
