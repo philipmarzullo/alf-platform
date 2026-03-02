@@ -141,10 +141,10 @@ SELECT
   '[
     { "key": "operations", "name": "Operations", "description": "Day-to-day custodial, maintenance, and grounds service delivery", "icon": "clipboard-list" },
     { "key": "hr", "name": "Human Resources", "description": "Workforce management, benefits, union compliance, training", "icon": "users" },
+    { "key": "safety", "name": "Safety", "description": "Risk management, OSHA compliance, incident tracking, training", "icon": "shield-check" },
     { "key": "finance", "name": "Finance", "description": "Budgeting, accounts receivable, financial reporting", "icon": "dollar-sign" },
-    { "key": "sales", "name": "Sales", "description": "Business development, proposals, client acquisition", "icon": "building" },
-    { "key": "purchasing", "name": "Purchasing", "description": "Procurement, vendor management, inventory", "icon": "shopping-cart" },
-    { "key": "safety", "name": "Safety", "description": "Risk management, OSHA compliance, incident tracking, training", "icon": "shield" }
+    { "key": "sales", "name": "Sales", "description": "Business development, proposals, client acquisition", "icon": "trending-up" },
+    { "key": "purchasing", "name": "Purchasing", "description": "Procurement, vendor management, inventory", "icon": "shopping-cart" }
   ]'::jsonb,
   '[
     { "category": "Janitorial", "services": ["Day Porter", "Nightly Cleaning", "Deep Clean / Periodic", "Event Support", "Health Protocols", "Special Event Support"] },
@@ -269,10 +269,10 @@ VALUES (
     "departments": [
       { "key": "operations", "name": "Operations", "description": "Day-to-day custodial, maintenance, and grounds service delivery", "icon": "clipboard-list" },
       { "key": "hr", "name": "Human Resources", "description": "Workforce management, benefits, union compliance, training", "icon": "users" },
+      { "key": "safety", "name": "Safety", "description": "Risk management, OSHA compliance, incident tracking, training", "icon": "shield-check" },
       { "key": "finance", "name": "Finance", "description": "Budgeting, accounts receivable, financial reporting", "icon": "dollar-sign" },
-      { "key": "sales", "name": "Sales", "description": "Business development, proposals, client acquisition", "icon": "building" },
-      { "key": "purchasing", "name": "Purchasing", "description": "Procurement, vendor management, inventory", "icon": "shopping-cart" },
-      { "key": "safety", "name": "Safety", "description": "Risk management, OSHA compliance, incident tracking, training", "icon": "shield" }
+      { "key": "sales", "name": "Sales", "description": "Business development, proposals, client acquisition", "icon": "trending-up" },
+      { "key": "purchasing", "name": "Purchasing", "description": "Procurement, vendor management, inventory", "icon": "shopping-cart" }
     ],
     "service_catalog": [
       { "category": "Janitorial", "services": ["Day Porter", "Nightly Cleaning", "Deep Clean / Periodic", "Event Support", "Health Protocols"] },
