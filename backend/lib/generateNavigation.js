@@ -42,7 +42,6 @@ export async function generateNavSections(supabase, tenantId) {
       sort_order: 3,
       items: [
         { key: 'automation', label: 'Automation Insights', path: '/portal/admin/automation', icon: 'Zap', module_key: 'automation' },
-        { key: 'sop-builder', label: 'SOP Builder', path: '/portal/tools/sop-builder', icon: 'FileText', module_key: 'automation' },
         { key: 'automation-preferences', label: 'Automation Preferences', path: '/portal/admin/automation-preferences', icon: 'SlidersHorizontal', module_key: 'automation', super_admin_only: true },
       ],
     },

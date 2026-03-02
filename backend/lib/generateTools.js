@@ -82,6 +82,17 @@ const TOOL_DEFS = [
     max_tokens: 4096,
     sort_order: 5,
   },
+  {
+    tool_key: 'sop-builder',
+    name: 'SOP Builder',
+    description: 'Create, upload, and manage Standard Operating Procedures with AI-guided section drafting.',
+    icon: 'file-text',
+    dept_key: 'operations',
+    agent_key: 'admin',
+    output_format: 'document',
+    max_tokens: 8192,
+    sort_order: 6,
+  },
 ];
 
 // ─── Intake Schema Templates ────────────────────────────
