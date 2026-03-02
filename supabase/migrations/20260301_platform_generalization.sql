@@ -65,42 +65,29 @@ CREATE TRIGGER trg_tenant_nav_sections_updated_at
 ALTER TABLE tenant_nav_sections ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "platform_owner_full_nav_sections"
-  ON tenant_nav_sections
-  FOR ALL
-  TO authenticated
+  ON tenant_nav_sections FOR ALL TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM auth.users u
-      WHERE u.id = auth.uid()
-      AND u.raw_user_meta_data->>'role' = 'platform_owner'
-    )
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'platform_owner')
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'platform_owner')
   );
 
 CREATE POLICY "super_admin_own_tenant_nav_sections"
-  ON tenant_nav_sections
-  FOR ALL
-  TO authenticated
+  ON tenant_nav_sections FOR ALL TO authenticated
   USING (
-    tenant_id = (
-      SELECT (raw_user_meta_data->>'tenant_id')::uuid
-      FROM auth.users WHERE id = auth.uid()
-    )
-    AND EXISTS (
-      SELECT 1 FROM auth.users u
-      WHERE u.id = auth.uid()
-      AND u.raw_user_meta_data->>'role' = 'super-admin'
-    )
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
+    AND EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'super-admin')
+  )
+  WITH CHECK (
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
+    AND EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'super-admin')
   );
 
 CREATE POLICY "tenant_user_read_nav_sections"
-  ON tenant_nav_sections
-  FOR SELECT
-  TO authenticated
+  ON tenant_nav_sections FOR SELECT TO authenticated
   USING (
-    tenant_id = (
-      SELECT (raw_user_meta_data->>'tenant_id')::uuid
-      FROM auth.users WHERE id = auth.uid()
-    )
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
   );
 
 -- ──────────────────────────────────────────────
@@ -134,42 +121,29 @@ CREATE INDEX IF NOT EXISTS idx_tenant_module_registry_tenant
 ALTER TABLE tenant_module_registry ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "platform_owner_full_module_registry"
-  ON tenant_module_registry
-  FOR ALL
-  TO authenticated
+  ON tenant_module_registry FOR ALL TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM auth.users u
-      WHERE u.id = auth.uid()
-      AND u.raw_user_meta_data->>'role' = 'platform_owner'
-    )
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'platform_owner')
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'platform_owner')
   );
 
 CREATE POLICY "super_admin_own_tenant_module_registry"
-  ON tenant_module_registry
-  FOR ALL
-  TO authenticated
+  ON tenant_module_registry FOR ALL TO authenticated
   USING (
-    tenant_id = (
-      SELECT (raw_user_meta_data->>'tenant_id')::uuid
-      FROM auth.users WHERE id = auth.uid()
-    )
-    AND EXISTS (
-      SELECT 1 FROM auth.users u
-      WHERE u.id = auth.uid()
-      AND u.raw_user_meta_data->>'role' = 'super-admin'
-    )
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
+    AND EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'super-admin')
+  )
+  WITH CHECK (
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
+    AND EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'super-admin')
   );
 
 CREATE POLICY "tenant_user_read_module_registry"
-  ON tenant_module_registry
-  FOR SELECT
-  TO authenticated
+  ON tenant_module_registry FOR SELECT TO authenticated
   USING (
-    tenant_id = (
-      SELECT (raw_user_meta_data->>'tenant_id')::uuid
-      FROM auth.users WHERE id = auth.uid()
-    )
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
   );
 
 -- ──────────────────────────────────────────────
@@ -203,42 +177,29 @@ CREATE INDEX IF NOT EXISTS idx_tenant_op_context_queries_tenant
 ALTER TABLE tenant_operational_context_queries ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "platform_owner_full_op_context"
-  ON tenant_operational_context_queries
-  FOR ALL
-  TO authenticated
+  ON tenant_operational_context_queries FOR ALL TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM auth.users u
-      WHERE u.id = auth.uid()
-      AND u.raw_user_meta_data->>'role' = 'platform_owner'
-    )
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'platform_owner')
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'platform_owner')
   );
 
 CREATE POLICY "super_admin_own_tenant_op_context"
-  ON tenant_operational_context_queries
-  FOR ALL
-  TO authenticated
+  ON tenant_operational_context_queries FOR ALL TO authenticated
   USING (
-    tenant_id = (
-      SELECT (raw_user_meta_data->>'tenant_id')::uuid
-      FROM auth.users WHERE id = auth.uid()
-    )
-    AND EXISTS (
-      SELECT 1 FROM auth.users u
-      WHERE u.id = auth.uid()
-      AND u.raw_user_meta_data->>'role' = 'super-admin'
-    )
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
+    AND EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'super-admin')
+  )
+  WITH CHECK (
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
+    AND EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'super-admin')
   );
 
 CREATE POLICY "tenant_user_read_op_context"
-  ON tenant_operational_context_queries
-  FOR SELECT
-  TO authenticated
+  ON tenant_operational_context_queries FOR SELECT TO authenticated
   USING (
-    tenant_id = (
-      SELECT (raw_user_meta_data->>'tenant_id')::uuid
-      FROM auth.users WHERE id = auth.uid()
-    )
+    tenant_id = (SELECT tenant_id FROM profiles WHERE profiles.id = auth.uid())
   );
 
 -- ──────────────────────────────────────────────
