@@ -248,20 +248,44 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     context += `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
   }
 
-  // Inject active automation skills for this agent
+  // Inject active automation skills for this agent, respecting execution mode
   const { data: skills } = await supabase
     .from('automation_actions')
-    .select('title, agent_skill_prompt')
+    .select('id, title, agent_skill_prompt')
     .eq('tenant_id', tenantId)
     .eq('agent_key', agentKey)
     .eq('status', 'active')
     .not('agent_skill_prompt', 'is', null);
 
   if (skills?.length) {
+    // Fetch automation preferences for this agent's skills
+    const { data: prefs } = await supabase
+      .from('automation_preferences')
+      .select('action_key, execution_mode')
+      .eq('tenant_id', tenantId)
+      .eq('agent_key', agentKey)
+      .eq('integration_type', 'agent_skill');
+
+    const prefMap = {};
+    for (const p of (prefs || [])) prefMap[p.action_key] = p.execution_mode;
+
     context += '\n\n=== AUTOMATION SKILLS ===\n';
     context += 'You have the following enhanced capabilities based on SOP analysis:\n\n';
-    context += skills.map(s => `### ${s.title}\n${s.agent_skill_prompt}`).join('\n\n');
-    console.log(`[claude] Injected ${skills.length} automation skill(s) for ${agentKey}`);
+
+    const skillBlocks = skills.map(s => {
+      const mode = prefMap[s.id] || 'review'; // default to review if no pref set
+      let modeInstruction = '';
+      if (mode === 'draft') {
+        modeInstruction = '\n[EXECUTION MODE: DRAFT] — Generate your output as a draft. Clearly label it "[DRAFT]" at the top. Explain that this is a draft for the user to review and edit before any action is taken. Do NOT present it as final or executed.';
+      } else if (mode === 'review') {
+        modeInstruction = '\n[EXECUTION MODE: REVIEW] — Generate your output and mark it "[PENDING REVIEW]" at the top. Include a brief summary of what will happen if approved. The user must approve before this takes effect.';
+      }
+      // 'automated' mode = no additional instruction, agent acts with full authority
+      return `### ${s.title}\n${s.agent_skill_prompt}${modeInstruction}`;
+    });
+
+    context += skillBlocks.join('\n\n');
+    console.log(`[claude] Injected ${skills.length} skill(s) for ${agentKey} (modes: ${skills.map(s => prefMap[s.id] || 'review').join(', ')})`);
   }
 
   // Fetch tenant operational memory
@@ -283,6 +307,38 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
   }
 
   return context || null;
+}
+
+/**
+ * Look up active skill execution modes for a tenant + agent.
+ * Returns an array of { skill_id, title, mode } for frontend metadata.
+ */
+async function getSkillExecutionModes(supabase, tenantId, agentKey) {
+  const { data: skills } = await supabase
+    .from('automation_actions')
+    .select('id, title')
+    .eq('tenant_id', tenantId)
+    .eq('agent_key', agentKey)
+    .eq('status', 'active')
+    .not('agent_skill_prompt', 'is', null);
+
+  if (!skills?.length) return null;
+
+  const { data: prefs } = await supabase
+    .from('automation_preferences')
+    .select('action_key, execution_mode')
+    .eq('tenant_id', tenantId)
+    .eq('agent_key', agentKey)
+    .eq('integration_type', 'agent_skill');
+
+  const prefMap = {};
+  for (const p of (prefs || [])) prefMap[p.action_key] = p.execution_mode;
+
+  return skills.map(s => ({
+    skill_id: s.id,
+    title: s.title,
+    mode: prefMap[s.id] || 'review',
+  }));
 }
 
 /**
@@ -406,7 +462,14 @@ router.post('/', rateLimit, async (req, res) => {
         if (error) console.warn('[claude] Usage log failed:', error.message);
       });
 
-    res.json(data);
+    // Attach skill execution modes so frontend can render mode-appropriate UI
+    let execution_context = null;
+    if (effectiveTenantId && agent_key) {
+      const modes = await getSkillExecutionModes(req.supabase, effectiveTenantId, agent_key);
+      if (modes?.length) execution_context = { skills: modes };
+    }
+
+    res.json({ ...data, execution_context });
   } catch (err) {
     console.error('[claude] Proxy error:', err.message);
     res.status(502).json({ error: 'Failed to reach AI service' });
