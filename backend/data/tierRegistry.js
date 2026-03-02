@@ -77,17 +77,9 @@ export const TIER_REGISTRY = {
 export const TIER_ORDER = { melmac: 0, orbit: 1, galaxy: 2 };
 
 /**
- * Build a full config object for a single module (all pages + actions enabled).
- */
-function fullModuleConfig(moduleKey) {
-  return {
-    pages: MODULE_PAGES[moduleKey] || [],
-    actions: MODULE_ACTIONS[moduleKey] || [],
-  };
-}
-
-/**
  * Returns full defaults for a tier: modules list, moduleConfig, maxUsers, maxAgentCalls.
+ * module_config is simplified to { key: true } — module-on / module-off only.
+ * Per-page/per-action gating has been removed from the tenant portal.
  */
 export function getTierDefaults(tierKey) {
   const tier = TIER_REGISTRY[tierKey];
@@ -95,7 +87,7 @@ export function getTierDefaults(tierKey) {
 
   const moduleConfig = {};
   for (const mod of tier.modules) {
-    moduleConfig[mod] = fullModuleConfig(mod);
+    moduleConfig[mod] = true;
   }
 
   return {

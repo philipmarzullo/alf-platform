@@ -36,7 +36,7 @@ router.get('/:tenantId/subscription', async (req, res) => {
     // Fetch tenant record
     const { data: tenant, error: tenantErr } = await req.supabase
       .from('alf_tenants')
-      .select('plan, is_active, max_users, max_agent_calls_per_month, enabled_modules')
+      .select('plan, is_active, max_users, max_agent_calls_per_month, module_config')
       .eq('id', tenantId)
       .single();
 
@@ -89,7 +89,7 @@ router.get('/:tenantId/subscription', async (req, res) => {
           limit: tenant.max_users,
         },
       },
-      enabled_modules: tenant.enabled_modules,
+      enabled_modules: Object.keys(tenant.module_config || {}),
     });
   } catch (err) {
     console.error('[subscription] GET failed:', err.message);
@@ -117,7 +117,7 @@ router.put('/:tenantId/subscription', async (req, res) => {
     // Fetch current tenant config
     const { data: tenant, error: fetchErr } = await req.supabase
       .from('alf_tenants')
-      .select('plan, enabled_modules, module_config')
+      .select('plan, module_config')
       .eq('id', tenantId)
       .single();
 
@@ -157,7 +157,6 @@ router.put('/:tenantId/subscription', async (req, res) => {
         plan,
         max_users: defaults.maxUsers,
         max_agent_calls_per_month: defaults.maxAgentCalls,
-        enabled_modules: defaults.modules,
         module_config: moduleConfig,
         updated_at: new Date().toISOString(),
       })
@@ -174,7 +173,7 @@ router.put('/:tenantId/subscription', async (req, res) => {
       success: true,
       plan,
       plan_label: TIER_REGISTRY[plan].label,
-      enabled_modules: defaults.modules,
+      enabled_modules: defaults.modules, // derived from module_config for backward compat
       max_users: defaults.maxUsers,
       max_agent_calls_per_month: defaults.maxAgentCalls,
     });

@@ -125,7 +125,6 @@ async function upsertTenant(supabase, tenantDef) {
     plan: tenantDef.plan,
     status: 'active',
     is_active: true,
-    enabled_modules: defaults.modules,
     module_config: defaults.moduleConfig,
     max_users: defaults.maxUsers,
     max_agent_calls_per_month: defaults.maxAgentCalls,
