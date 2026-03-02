@@ -1895,7 +1895,7 @@ router.get('/:tenantId/ops-intelligence', async (req, res) => {
         .eq('tenant_id', effectiveTenantId),
       req.supabase
         .from('automation_actions')
-        .select('id, status')
+        .select('id, status, source')
         .eq('tenant_id', effectiveTenantId),
     ]);
 
@@ -1906,8 +1906,9 @@ router.get('/:tenantId/ops-intelligence', async (req, res) => {
     const deployedSkills = sops.filter(s => s.status === 'completed').length;
     const totalSkills = sops.length;
 
-    const automations = automationsRes.data || [];
-    const automationsCompleted = automations.filter(a => a.status === 'completed').length;
+    // Filter out action plan items — only count SOP-derived automations
+    const automations = (automationsRes.data || []).filter(a => a.source !== 'dashboard_action_plan');
+    const automationsCompleted = automations.filter(a => a.status === 'active' || a.status === 'completed').length;
     const automationsTotal = automations.length;
 
     const result = {
