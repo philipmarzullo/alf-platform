@@ -22,6 +22,7 @@ import demoRequestRouter from './routes/demoRequest.js';
 import memoryRouter from './routes/memory.js';
 import subscriptionRouter from './routes/subscription.js';
 import demoResetRouter from './routes/demoReset.js';
+import metricsRouter from './routes/metrics.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -85,6 +86,7 @@ app.use('/api/tenant-portal', auth, tenantPortalRouter);
 app.use('/api/memory', auth, memoryRouter);
 app.use('/api/subscription', auth, subscriptionRouter);
 app.use('/api/tenants', auth, demoResetRouter);
+app.use('/api/metrics', auth, metricsRouter);
 
 // --- 404 ---
 app.use((req, res) => {

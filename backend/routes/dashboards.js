@@ -4,6 +4,7 @@ import { resolveApiKey } from '../lib/resolveApiKey.js';
 import { getUserScopedJobIds, intersectJobIds } from '../lib/scopedJobs.js';
 import { getUserTemplate } from '../lib/userTemplate.js';
 import { extractMemories } from './memory.js';
+import { executeMetrics, evaluateThresholds, getAllowedTables } from '../lib/metricEngine.js';
 
 const router = Router();
 
@@ -883,6 +884,101 @@ router.get('/:tenantId/home-summary', async (req, res) => {
   if (cached) return res.json(cached);
 
   try {
+    // ─── Dynamic path: check if tenant has dynamic hero metrics ───
+    const { count: dynamicHeroCount } = await req.supabase
+      .from('tenant_metrics')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', effectiveTenantId)
+      .eq('is_hero', true)
+      .eq('is_active', true);
+
+    if (dynamicHeroCount > 0) {
+      // DYNAMIC PATH — tenant has configured metrics
+      const [heroMetrics, allMetrics, thresholdRows, jobs] = await Promise.all([
+        req.supabase
+          .from('tenant_metrics')
+          .select('*, tenant_dashboard_domains!inner(domain_key, name)')
+          .eq('tenant_id', effectiveTenantId)
+          .eq('is_hero', true)
+          .eq('is_active', true)
+          .order('hero_order'),
+        req.supabase
+          .from('tenant_metrics')
+          .select('*, tenant_dashboard_domains!inner(domain_key, name)')
+          .eq('tenant_id', effectiveTenantId)
+          .eq('is_active', true),
+        req.supabase
+          .from('tenant_metric_thresholds')
+          .select('*')
+          .eq('tenant_id', effectiveTenantId)
+          .eq('is_active', true),
+        DASHBOARD_QUERIES.JOBS(req.supabase, effectiveTenantId),
+      ]);
+
+      const allowedTables = await getAllowedTables(req.supabase, effectiveTenantId);
+
+      const heroRows = heroMetrics.data || [];
+      const allMetricRows = allMetrics.data || [];
+      const thresholds = thresholdRows.data || [];
+
+      // Execute hero metrics
+      const heroValues = await executeMetrics(req.supabase, effectiveTenantId, heroRows, filters, allowedTables);
+
+      // Build hero object with metric keys
+      const hero = {};
+      for (const m of heroRows) {
+        hero[m.metric_key] = heroValues[m.metric_key];
+      }
+      hero.totalProperties = jobs.length;
+
+      // Build domain summaries from metrics
+      const domainMap = {};
+      for (const m of allMetricRows) {
+        const dk = m.tenant_dashboard_domains?.domain_key;
+        if (dk && !domainMap[dk]) {
+          domainMap[dk] = { hasData: true, stats: [] };
+        }
+      }
+
+      // Evaluate thresholds for attention items
+      const jobMap = {};
+      for (const j of jobs) jobMap[j.id] = j.job_name;
+
+      // Attach domain_key to metrics for threshold dept mapping
+      const metricsWithDomain = allMetricRows.map(m => ({
+        ...m,
+        domain_key: m.tenant_dashboard_domains?.domain_key,
+      }));
+
+      const attentionItems = await evaluateThresholds(
+        req.supabase, effectiveTenantId, thresholds, metricsWithDomain,
+        filters, jobMap, allowedTables
+      );
+
+      const dynamicResult = {
+        hero,
+        heroMetrics: heroRows.map(m => ({
+          key: m.metric_key,
+          label: m.label,
+          format: m.format,
+          unit: m.unit,
+          icon: m.icon,
+          color: m.color,
+          domain: m.tenant_dashboard_domains?.domain_key,
+          value: heroValues[m.metric_key],
+        })),
+        domains: domainMap,
+        attentionItems,
+        hasData: Object.keys(heroValues).some(k => heroValues[k] != null),
+        isDynamic: true,
+      };
+
+      setCache(key, dynamicResult);
+      return res.json(dynamicResult);
+    }
+
+    // ─── LEGACY PATH — exact current code, untouched ───
+
     // Fetch all domains in parallel
     const [jobs, tickets, labor, quality, timekeeping, safety] = await Promise.all([
       DASHBOARD_QUERIES.JOBS(req.supabase, effectiveTenantId),
@@ -1950,11 +2046,6 @@ router.get('/:tenantId/:domain', async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
-  const validDomains = ['operations', 'labor', 'quality', 'timekeeping', 'safety'];
-  if (!validDomains.includes(domain)) {
-    return res.status(400).json({ error: `Invalid domain. Must be one of: ${validDomains.join(', ')}` });
-  }
-
   // Apply user site scoping
   const requestedJobIds = req.query.jobIds ? req.query.jobIds.split(',') : null;
   const scopedJobIds = await getUserScopedJobIds(req.supabase, req.user.id, effectiveTenantId, req.user.role);
@@ -1974,6 +2065,69 @@ router.get('/:tenantId/:domain', async (req, res) => {
   }
 
   try {
+    // ─── Dynamic path: check if domain has dynamic metrics ───
+    // Look up the domain_id from tenant_dashboard_domains
+    const { data: domainRow } = await req.supabase
+      .from('tenant_dashboard_domains')
+      .select('id')
+      .eq('tenant_id', effectiveTenantId)
+      .eq('domain_key', domain)
+      .maybeSingle();
+
+    if (domainRow) {
+      const { count: dynamicCount } = await req.supabase
+        .from('tenant_metrics')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', effectiveTenantId)
+        .eq('domain_id', domainRow.id)
+        .eq('is_active', true);
+
+      if (dynamicCount > 0) {
+        // DYNAMIC PATH — execute tenant-defined metrics for this domain
+        const { data: domainMetrics } = await req.supabase
+          .from('tenant_metrics')
+          .select('*, tenant_dashboard_domains!inner(domain_key, name)')
+          .eq('tenant_id', effectiveTenantId)
+          .eq('domain_id', domainRow.id)
+          .eq('is_active', true)
+          .order('sort_order');
+
+        const allowedTables = await getAllowedTables(req.supabase, effectiveTenantId);
+        const metricRows = domainMetrics || [];
+        const values = await executeMetrics(req.supabase, effectiveTenantId, metricRows, filters, allowedTables);
+
+        const jobs = await DASHBOARD_QUERIES.JOBS(req.supabase, effectiveTenantId);
+
+        const dynamicData = {
+          isDynamic: true,
+          domain,
+          metrics: metricRows.map(m => ({
+            key: m.metric_key,
+            label: m.label,
+            description: m.description,
+            display_as: m.display_as,
+            format: m.format,
+            unit: m.unit,
+            icon: m.icon,
+            color: m.color,
+            sensitivity: m.sensitivity,
+            sort_order: m.sort_order,
+            value: values[m.metric_key],
+          })),
+          jobs,
+        };
+
+        setCache(key, dynamicData);
+        return res.json(dynamicData);
+      }
+    }
+
+    // ─── LEGACY PATH — hardcoded domain queries ───
+    const validDomains = ['operations', 'labor', 'quality', 'timekeeping', 'safety'];
+    if (!validDomains.includes(domain)) {
+      return res.status(400).json({ error: `Invalid domain. Must be one of: ${validDomains.join(', ')}` });
+    }
+
     const data = await getDomainData(req.supabase, effectiveTenantId, domain, filters);
     setCache(key, data);
     res.json(data);
