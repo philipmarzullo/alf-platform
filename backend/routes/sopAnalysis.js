@@ -855,6 +855,90 @@ router.post('/activate-skill', rateLimit, async (req, res) => {
 });
 
 /**
+ * POST /api/sop-analysis/deactivate-skill
+ *
+ * Deactivate an active agent skill — remove it from tenant_agent_overrides.
+ * Body: { tenant_id, action_id }
+ */
+router.post('/deactivate-skill', rateLimit, async (req, res) => {
+  if (!(await requireAuthorizedUser(req, res))) return;
+
+  const isPlatformAdmin = req._isPlatformAdmin;
+  const tenant_id = isPlatformAdmin ? req.body.tenant_id : req.tenantId;
+  const { action_id } = req.body;
+
+  if (!tenant_id || !action_id) {
+    return res.status(400).json({ error: 'Required: tenant_id, action_id' });
+  }
+
+  // Fetch the action
+  const { data: action, error: actErr } = await req.supabase
+    .from('automation_actions')
+    .select('*')
+    .eq('id', action_id)
+    .eq('tenant_id', tenant_id)
+    .single();
+
+  if (actErr || !action) {
+    return res.status(404).json({ error: 'Action not found' });
+  }
+
+  if (action.status !== 'active') {
+    return res.status(400).json({ error: `Cannot deactivate action with status: ${action.status}` });
+  }
+
+  try {
+    // Remove skill block from tenant_agent_overrides
+    if (action.agent_key) {
+      const { data: override } = await req.supabase
+        .from('tenant_agent_overrides')
+        .select('*')
+        .eq('tenant_id', tenant_id)
+        .eq('agent_key', action.agent_key)
+        .single();
+
+      if (override) {
+        const skillBlockRegex = new RegExp(
+          `\\n*<!-- SKILL:${action_id} -->\\n[\\s\\S]*?<!-- /SKILL:${action_id} -->`,
+          'g'
+        );
+        const cleaned = (override.custom_prompt_additions || '').replace(skillBlockRegex, '').trim();
+
+        if (cleaned) {
+          await req.supabase
+            .from('tenant_agent_overrides')
+            .update({ custom_prompt_additions: cleaned })
+            .eq('id', override.id);
+        } else {
+          // No more skills — remove the override row entirely
+          await req.supabase
+            .from('tenant_agent_overrides')
+            .delete()
+            .eq('id', override.id);
+        }
+      }
+    }
+
+    // Update action status back to ready_for_review
+    const { data: updated, error: updateErr } = await req.supabase
+      .from('automation_actions')
+      .update({ status: 'ready_for_review' })
+      .eq('id', action_id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    console.log(`[sop-analysis] Skill deactivated: "${action.title}" — removed from ${action.agent_key} agent`);
+
+    res.json({ action: updated });
+  } catch (err) {
+    console.error('[sop-analysis] Skill deactivation failed:', err.message);
+    res.status(500).json({ error: 'Skill deactivation failed: ' + err.message });
+  }
+});
+
+/**
  * GET /api/sop-analysis/actions
  *
  * Fetch automation actions for a tenant.
