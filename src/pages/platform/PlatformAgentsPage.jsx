@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Database, Bot, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Database, Bot, ChevronDown, ChevronRight, MessageSquareText } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
@@ -41,6 +41,7 @@ export default function PlatformAgentsPage() {
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState(null);
   const [expandedTenant, setExpandedTenant] = useState(null);
+  const [pendingCounts, setPendingCounts] = useState({});
 
   useEffect(() => { loadData(); }, []);
 
@@ -51,10 +52,11 @@ export default function PlatformAgentsPage() {
     try {
       const sourceAgents = getAllSourceAgents();
 
-      const [dbRes, tenantsRes, overridesRes] = await Promise.all([
+      const [dbRes, tenantsRes, overridesRes, pendingRes] = await Promise.all([
         supabase.from('alf_agent_definitions').select('*').order('agent_key'),
         supabase.from('alf_tenants').select('*').order('company_name'),
         supabase.from('tenant_agent_overrides').select('tenant_id, agent_key, is_enabled, custom_prompt_additions'),
+        supabase.from('agent_instructions').select('agent_key').eq('status', 'pending'),
       ]);
 
       if (dbRes.error) throw dbRes.error;
@@ -99,6 +101,13 @@ export default function PlatformAgentsPage() {
       setAgents(merged);
       setTenants(tenantsRes.data || []);
       setOverrides(overridesRes.data || []);
+
+      // Build pending instruction counts per agent_key
+      const counts = {};
+      for (const row of (pendingRes.data || [])) {
+        counts[row.agent_key] = (counts[row.agent_key] || 0) + 1;
+      }
+      setPendingCounts(counts);
 
       // Auto-expand if only one tenant
       const tenantList = tenantsRes.data || [];
@@ -267,6 +276,12 @@ export default function PlatformAgentsPage() {
                                   <span className="text-sm font-medium text-dark-text">
                                     {agent.name}
                                   </span>
+                                  {pendingCounts[agent.key] > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-orange-50 text-orange-700" title="Pending instructions">
+                                      <MessageSquareText size={10} />
+                                      {pendingCounts[agent.key]}
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-4 py-2.5">
@@ -328,6 +343,12 @@ export default function PlatformAgentsPage() {
                               <span className="text-sm font-medium text-dark-text">
                                 {agent.name}
                               </span>
+                              {pendingCounts[agent.key] > 0 && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-orange-50 text-orange-700" title="Pending instructions">
+                                  <MessageSquareText size={10} />
+                                  {pendingCounts[agent.key]}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-4 py-2.5">

@@ -222,6 +222,35 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
 }
 
 /**
+ * Fetch approved agent instructions (global + tenant-specific) for injection.
+ */
+async function getAgentInstructions(supabase, tenantId, agentKey) {
+  const { data: instructions } = await supabase
+    .from('agent_instructions')
+    .select('instruction_text, extracted_text, tenant_id, source')
+    .eq('agent_key', agentKey)
+    .eq('status', 'approved')
+    .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
+    .order('created_at');
+
+  if (!instructions?.length) return null;
+
+  const blocks = instructions.map(i => {
+    const scope = i.tenant_id ? '[TENANT]' : '[GLOBAL]';
+    let text = `${scope} ${i.instruction_text}`;
+    if (i.extracted_text) {
+      text += `\n[ATTACHED DOCUMENT]\n${i.extracted_text}`;
+    }
+    return text;
+  });
+
+  console.log(`[claude] Injected ${instructions.length} agent instruction(s) for ${agentKey}`);
+
+  return `\n\n=== AGENT INSTRUCTIONS ===
+The following are specific instructions for how you should behave. Follow them precisely.\n\n${blocks.join('\n\n')}`;
+}
+
+/**
  * Look up active skill execution modes for a tenant + agent.
  * Returns an array of { skill_id, title, mode } for frontend metadata.
  */
@@ -327,6 +356,12 @@ router.post('/', rateLimit, async (req, res) => {
           enrichedSystem = enrichedSystem + opsCtx;
           console.log(`[claude] Injected operational data for ${agent_key} — ${opsCtx.length} chars`);
         }
+      }
+
+      // Inject approved agent instructions (global + tenant-specific)
+      const instructionsCtx = await getAgentInstructions(req.supabase, effectiveTenantId, agent_key);
+      if (instructionsCtx) {
+        enrichedSystem = enrichedSystem + instructionsCtx;
       }
     }
 

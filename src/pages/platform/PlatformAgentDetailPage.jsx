@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Save, Loader2, RotateCcw, Zap, BookOpen, Users,
-  ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight, MessageSquareText, Plus, Check, X as XIcon,
+  Globe, Building2, Upload,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { getSourceAgentConfig, getAllSourceAgents } from '../../agents/registry';
@@ -48,6 +49,15 @@ export default function PlatformAgentDetailPage() {
   const [knowledgeModules, setKnowledgeModules] = useState([]);
   // Tenant assignments
   const [tenantAssignments, setTenantAssignments] = useState([]);
+  // Agent instructions
+  const [instructions, setInstructions] = useState([]);
+  const [allTenants, setAllTenants] = useState([]);
+  const [instrForm, setInstrForm] = useState({ scope: 'global', tenantId: '', text: '' });
+  const [instrFile, setInstrFile] = useState(null);
+  const [submittingInstr, setSubmittingInstr] = useState(false);
+  const instrFileRef = useRef(null);
+  const [reviewingId, setReviewingId] = useState(null);
+  const [reviewNote, setReviewNote] = useState('');
 
   useEffect(() => { loadData(); }, [agentKey]);
 
@@ -78,8 +88,8 @@ export default function PlatformAgentDetailPage() {
       // Knowledge modules
       setKnowledgeModules(src?.knowledgeModules || []);
 
-      // Fetch DB record and tenant overrides in parallel
-      const [dbRes, overridesRes] = await Promise.all([
+      // Fetch DB record, overrides, instructions, and tenants in parallel
+      const [dbRes, overridesRes, instrRes, tenantsRes] = await Promise.all([
         supabase
           .from('alf_agent_definitions')
           .select('*')
@@ -89,6 +99,15 @@ export default function PlatformAgentDetailPage() {
           .from('tenant_agent_overrides')
           .select('tenant_id, is_enabled, custom_prompt_additions, alf_tenants(id, name)')
           .eq('agent_key', agentKey),
+        supabase
+          .from('agent_instructions')
+          .select('*, profiles:created_by(full_name), reviewer:reviewed_by(full_name), alf_tenants:tenant_id(name)')
+          .eq('agent_key', agentKey)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('alf_tenants')
+          .select('id, name, company_name')
+          .order('company_name'),
       ]);
 
       if (dbRes.error) throw dbRes.error;
@@ -128,6 +147,8 @@ export default function PlatformAgentDetailPage() {
         };
       });
       setTenantAssignments(assignments);
+      setInstructions(instrRes.data || []);
+      setAllTenants(tenantsRes.data || []);
     } catch (err) {
       setError(err.message);
     }
@@ -175,6 +196,98 @@ export default function PlatformAgentDetailPage() {
       setError(err.message);
     }
     setSaving(false);
+  }
+
+  async function handleAddInstruction() {
+    if (!instrForm.text.trim()) return;
+    setSubmittingInstr(true);
+    setError(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const tenantId = instrForm.scope === 'global' ? null : instrForm.tenantId || null;
+
+      let fileFields = {};
+      if (instrFile) {
+        const storagePath = `instructions/${agentKey}/${Date.now()}_${instrFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const { error: uploadErr } = await supabase.storage
+          .from('tenant-documents')
+          .upload(storagePath, instrFile);
+        if (uploadErr) throw uploadErr;
+
+        // Extract text from file
+        let extractedText = '';
+        if (instrFile.name.toLowerCase().endsWith('.txt')) {
+          extractedText = await instrFile.text();
+        }
+
+        fileFields = {
+          file_name: instrFile.name,
+          file_type: instrFile.name.split('.').pop().toLowerCase(),
+          file_size: instrFile.size,
+          storage_path: storagePath,
+          extracted_text: extractedText || null,
+        };
+      }
+
+      const { error: insertErr } = await supabase
+        .from('agent_instructions')
+        .insert({
+          tenant_id: tenantId,
+          agent_key: agentKey,
+          instruction_text: instrForm.text.trim(),
+          source: 'platform',
+          status: 'approved',
+          created_by: user.id,
+          ...fileFields,
+        });
+
+      if (insertErr) throw insertErr;
+
+      setInstrForm({ scope: 'global', tenantId: '', text: '' });
+      setInstrFile(null);
+      loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+    setSubmittingInstr(false);
+  }
+
+  async function handleReviewInstruction(instrId, newStatus) {
+    setError(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error: updateErr } = await supabase
+        .from('agent_instructions')
+        .update({
+          status: newStatus,
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          review_note: reviewNote.trim() || null,
+        })
+        .eq('id', instrId);
+
+      if (updateErr) throw updateErr;
+      setReviewingId(null);
+      setReviewNote('');
+      loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleDeleteInstruction(instrId) {
+    setError(null);
+    try {
+      const { error: delErr } = await supabase
+        .from('agent_instructions')
+        .delete()
+        .eq('id', instrId);
+      if (delErr) throw delErr;
+      loadData();
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   function handleResetToSource() {
@@ -445,6 +558,198 @@ export default function PlatformAgentDetailPage() {
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-sm text-secondary-text">
             No tenants have been assigned this agent yet.
+          </div>
+        )}
+      </section>
+
+      {/* Agent Instructions */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <MessageSquareText size={16} className="text-secondary-text" />
+          <h2 className="text-lg font-semibold text-dark-text">
+            Agent Instructions ({instructions.length})
+          </h2>
+        </div>
+
+        {/* Add instruction form */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 space-y-3">
+          <div className="text-sm font-medium text-dark-text">Add Instruction</div>
+
+          <div className="flex items-center gap-3">
+            <select
+              value={instrForm.scope}
+              onChange={(e) => setInstrForm(f => ({ ...f, scope: e.target.value, tenantId: '' }))}
+              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange bg-white"
+            >
+              <option value="global">Global (all tenants)</option>
+              <option value="tenant">Specific tenant</option>
+            </select>
+            {instrForm.scope === 'tenant' && (
+              <select
+                value={instrForm.tenantId}
+                onChange={(e) => setInstrForm(f => ({ ...f, tenantId: e.target.value }))}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange bg-white"
+              >
+                <option value="">Select tenant...</option>
+                {allTenants.map(t => (
+                  <option key={t.id} value={t.id}>{t.company_name || t.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <textarea
+            value={instrForm.text}
+            onChange={(e) => setInstrForm(f => ({ ...f, text: e.target.value }))}
+            rows={3}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange resize-none"
+            placeholder="Enter instruction text..."
+          />
+
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-secondary-text border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+              <Upload size={14} />
+              {instrFile ? instrFile.name : 'Attach file (optional)'}
+              <input
+                ref={instrFileRef}
+                type="file"
+                accept=".pdf,.docx,.txt"
+                onChange={(e) => { if (e.target.files[0]) setInstrFile(e.target.files[0]); }}
+                className="hidden"
+              />
+            </label>
+            {instrFile && (
+              <button onClick={() => setInstrFile(null)} className="text-xs text-gray-400 hover:text-red-500">
+                <XIcon size={14} />
+              </button>
+            )}
+
+            <button
+              onClick={handleAddInstruction}
+              disabled={submittingInstr || !instrForm.text.trim() || (instrForm.scope === 'tenant' && !instrForm.tenantId)}
+              className="ml-auto flex items-center gap-1.5 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
+            >
+              {submittingInstr ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              Add
+            </button>
+          </div>
+        </div>
+
+        {/* Instructions list */}
+        {instructions.length === 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-sm text-secondary-text">
+            No instructions for this agent yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {instructions.map((instr) => {
+              const isPending = instr.status === 'pending';
+              const isReviewing = reviewingId === instr.id;
+
+              return (
+                <div key={instr.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          {/* Scope badge */}
+                          {instr.tenant_id ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-50 text-blue-700">
+                              <Building2 size={10} />
+                              {instr.alf_tenants?.name || 'Tenant'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-50 text-purple-700">
+                              <Globe size={10} />
+                              Global
+                            </span>
+                          )}
+                          {/* Source badge */}
+                          <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                            instr.source === 'platform' ? 'bg-alf-orange/10 text-alf-orange' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {instr.source}
+                          </span>
+                          {/* Status badge */}
+                          <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                            instr.status === 'approved' ? 'bg-green-50 text-green-700' :
+                            instr.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                            'bg-orange-50 text-orange-700'
+                          }`}>
+                            {instr.status}
+                          </span>
+                          {instr.file_name && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600">
+                              {instr.file_name}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-dark-text whitespace-pre-wrap">{instr.instruction_text}</p>
+                        <div className="text-xs text-secondary-text mt-1">
+                          {instr.profiles?.full_name || 'Unknown'} · {new Date(instr.created_at).toLocaleDateString()}
+                          {instr.review_note && (
+                            <span className="ml-2 text-gray-400">Note: {instr.review_note}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isPending && !isReviewing && (
+                          <>
+                            <button
+                              onClick={() => handleReviewInstruction(instr.id, 'approved')}
+                              className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                              title="Approve"
+                            >
+                              <Check size={16} />
+                            </button>
+                            <button
+                              onClick={() => setReviewingId(instr.id)}
+                              className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors"
+                              title="Reject"
+                            >
+                              <XIcon size={16} />
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => handleDeleteInstruction(instr.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors"
+                          title="Delete"
+                        >
+                          <XIcon size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Reject with note */}
+                    {isReviewing && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={reviewNote}
+                          onChange={(e) => setReviewNote(e.target.value)}
+                          placeholder="Review note (optional)..."
+                          className="flex-1 px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-alf-orange"
+                        />
+                        <button
+                          onClick={() => handleReviewInstruction(instr.id, 'rejected')}
+                          className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          onClick={() => { setReviewingId(null); setReviewNote(''); }}
+                          className="px-3 py-1.5 text-xs text-secondary-text hover:text-dark-text transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
