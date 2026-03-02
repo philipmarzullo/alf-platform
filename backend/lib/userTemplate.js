@@ -37,16 +37,36 @@ export async function getUserTemplate(supabase, userId, tenantId, role) {
   // Admins get implicit full access
   if (ADMIN_ROLES.includes(role)) return IMPLICIT_ADMIN_TEMPLATE;
 
-  // Check profile for assigned template
+  // Check profile for assigned template and per-user dashboard access
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('dashboard_template_id')
+    .select('dashboard_template_id, allowed_dashboards')
     .eq('id', userId)
     .single();
 
   if (profileError) {
     console.error('[userTemplate] Profile lookup error:', profileError.message);
     return FALLBACK_TEMPLATE;
+  }
+
+  // If allowed_dashboards is set on profile, use it directly for domain filtering
+  if (profile?.allowed_dashboards !== null && profile?.allowed_dashboards !== undefined) {
+    const domains = profile.allowed_dashboards.length === 0
+      ? ALL_DOMAINS  // empty array = all dashboards
+      : profile.allowed_dashboards;
+
+    // Get metric_tier from template if assigned, otherwise default
+    let metricTier = 'operational';
+    if (profile?.dashboard_template_id) {
+      const { data: tpl } = await supabase
+        .from('dashboard_role_templates')
+        .select('metric_tier')
+        .eq('id', profile.dashboard_template_id)
+        .single();
+      if (tpl) metricTier = tpl.metric_tier;
+    }
+
+    return { id: null, name: null, metric_tier: metricTier, allowed_domains: domains, default_hero_metrics: null };
   }
 
   if (profile?.dashboard_template_id) {
