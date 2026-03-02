@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import rateLimit from '../middleware/rateLimit.js';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
+import { extractMemories } from './memory.js';
 
 const router = Router();
 
@@ -45,190 +46,101 @@ export function invalidateTenantCache(tenantId) {
   tenantLimitsCache.delete(tenantId);
 }
 
-// Maps agent keys to departments for knowledge injection
-const AGENT_DEPT_MAP = {
-  hr: ['hr'],
-  finance: ['finance'],
-  purchasing: ['purchasing'],
-  sales: ['sales'],
-  ops: ['ops'],
-  admin: ['admin', 'general'],
-  qbu: ['general'],
-  salesDeck: ['general'],
-  actionPlan: ['ops', 'general'],
-  analytics: ['ops', 'general'],
-};
-
 /**
- * Fetch operational data summaries from sf_* tables for the analytics agent.
+ * Fetch operational data summaries from tenant_operational_context_queries.
+ * Falls back to direct sf_* queries if no query rows exist (transition period).
  */
 async function getOperationalContext(supabase, tenantId) {
+  // Fetch configured queries
+  const { data: queries } = await supabase
+    .from('tenant_operational_context_queries')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .order('sort_order');
+
+  if (!queries?.length) return null;
+
+  // Validate source tables against tenant_data_sources allowlist
+  const { data: dataSources } = await supabase
+    .from('tenant_data_sources')
+    .select('table_name')
+    .eq('tenant_id', tenantId);
+
+  const allowedTables = new Set((dataSources || []).map(ds => ds.table_name));
+
   const sections = [];
 
-  // Jobs summary
-  const { data: jobs } = await supabase
-    .from('sf_dim_job')
-    .select('id, job_name, job_status, region, service_type, contract_value_monthly')
-    .eq('tenant_id', tenantId);
-
-  if (jobs?.length) {
-    const active = jobs.filter(j => j.job_status === 'active');
-    const totalContractValue = active.reduce((s, j) => s + (j.contract_value_monthly || 0), 0);
-    const regions = [...new Set(active.map(j => j.region).filter(Boolean))];
-    const serviceTypes = [...new Set(active.map(j => j.service_type).filter(Boolean))];
-
-    sections.push(`## Jobs (${active.length} active / ${jobs.length} total)
-Monthly contract value: $${totalContractValue.toLocaleString()}
-Regions: ${regions.join(', ') || 'N/A'}
-Service types: ${serviceTypes.join(', ') || 'N/A'}
-
-Active jobs:
-${active.map(j => `- ${j.job_name} | ${j.region || 'N/A'} | ${j.service_type || 'N/A'} | $${(j.contract_value_monthly || 0).toLocaleString()}/mo`).join('\n')}`);
-  }
-
-  // Employees summary
-  const { data: employees } = await supabase
-    .from('sf_dim_employee')
-    .select('id, employment_status, department, job_title, hourly_rate')
-    .eq('tenant_id', tenantId);
-
-  if (employees?.length) {
-    const active = employees.filter(e => e.employment_status === 'active');
-    const byDept = {};
-    for (const e of active) {
-      const d = e.department || 'Unknown';
-      byDept[d] = (byDept[d] || 0) + 1;
-    }
-    const avgRate = active.length > 0
-      ? (active.reduce((s, e) => s + (e.hourly_rate || 0), 0) / active.length).toFixed(2)
-      : 'N/A';
-
-    sections.push(`## Employees (${active.length} active / ${employees.length} total)
-Avg hourly rate: $${avgRate}
-By department: ${Object.entries(byDept).map(([d, c]) => `${d}: ${c}`).join(', ')}`);
-  }
-
-  // Labor budget summary (recent months)
-  const { data: labor } = await supabase
-    .from('sf_fact_labor_budget_actual')
-    .select('date_key, budget_hours, actual_hours, budget_cost, actual_cost, overtime_hours, overtime_cost')
-    .eq('tenant_id', tenantId)
-    .order('date_key', { ascending: false })
-    .limit(200);
-
-  if (labor?.length) {
-    // Aggregate by month
-    const byMonth = {};
-    for (const r of labor) {
-      const month = r.date_key?.slice(0, 7) || 'unknown';
-      if (!byMonth[month]) byMonth[month] = { budget_hours: 0, actual_hours: 0, budget_cost: 0, actual_cost: 0, overtime_hours: 0, overtime_cost: 0 };
-      byMonth[month].budget_hours += r.budget_hours || 0;
-      byMonth[month].actual_hours += r.actual_hours || 0;
-      byMonth[month].budget_cost += r.budget_cost || 0;
-      byMonth[month].actual_cost += r.actual_cost || 0;
-      byMonth[month].overtime_hours += r.overtime_hours || 0;
-      byMonth[month].overtime_cost += r.overtime_cost || 0;
+  for (const q of queries) {
+    // Skip if source table isn't in discovered data sources (safety check)
+    // Allow sf_* tables even without data_sources rows for backward compat
+    if (!q.source_table.startsWith('sf_') && allowedTables.size > 0 && !allowedTables.has(q.source_table)) {
+      continue;
     }
 
-    const months = Object.keys(byMonth).sort().reverse().slice(0, 6);
-    sections.push(`## Labor Budget vs Actual (last ${months.length} months)
-${months.map(m => {
-  const d = byMonth[m];
-  const variance = d.actual_cost - d.budget_cost;
-  return `${m}: Budget $${d.budget_cost.toLocaleString()} / Actual $${d.actual_cost.toLocaleString()} (${variance >= 0 ? '+' : ''}$${variance.toLocaleString()}) | OT: ${d.overtime_hours.toFixed(0)} hrs ($${d.overtime_cost.toLocaleString()})`;
-}).join('\n')}`);
-  }
+    try {
+      let query = supabase
+        .from(q.source_table)
+        .select(q.select_columns.join(', '))
+        .eq('tenant_id', tenantId);
 
-  // Timekeeping summary
-  const { data: timekeeping } = await supabase
-    .from('sf_fact_timekeeping')
-    .select('date_key, regular_hours, overtime_hours, double_time_hours, total_hours, pay_type')
-    .eq('tenant_id', tenantId)
-    .order('date_key', { ascending: false })
-    .limit(500);
+      if (q.order_by) {
+        const [col, dir] = q.order_by.split(' ');
+        query = query.order(col, { ascending: dir !== 'desc' });
+      }
+      if (q.row_limit) {
+        query = query.limit(q.row_limit);
+      }
 
-  if (timekeeping?.length) {
-    const totalRegular = timekeeping.reduce((s, r) => s + (r.regular_hours || 0), 0);
-    const totalOT = timekeeping.reduce((s, r) => s + (r.overtime_hours || 0), 0);
-    const totalDT = timekeeping.reduce((s, r) => s + (r.double_time_hours || 0), 0);
-    const totalHours = timekeeping.reduce((s, r) => s + (r.total_hours || 0), 0);
-    const otPct = totalHours > 0 ? ((totalOT / totalHours) * 100).toFixed(1) : '0';
+      const { data: rows, error } = await query;
+      if (error || !rows?.length) continue;
 
-    sections.push(`## Timekeeping Summary (${timekeeping.length} recent records)
-Regular: ${totalRegular.toFixed(0)} hrs | OT: ${totalOT.toFixed(0)} hrs (${otPct}%) | DT: ${totalDT.toFixed(0)} hrs
-Total: ${totalHours.toFixed(0)} hours`);
-  }
-
-  // Work tickets summary
-  const { data: tickets } = await supabase
-    .from('sf_fact_work_tickets')
-    .select('ticket_status, priority, quality_score, category')
-    .eq('tenant_id', tenantId);
-
-  if (tickets?.length) {
-    const byStatus = {};
-    const byPriority = {};
-    const byCategory = {};
-    let totalScore = 0, scoreCount = 0;
-    for (const t of tickets) {
-      byStatus[t.ticket_status] = (byStatus[t.ticket_status] || 0) + 1;
-      if (t.priority) byPriority[t.priority] = (byPriority[t.priority] || 0) + 1;
-      if (t.category) byCategory[t.category] = (byCategory[t.category] || 0) + 1;
-      if (t.quality_score != null) { totalScore += t.quality_score; scoreCount++; }
+      // Render based on summary_type
+      if (q.summary_type === 'raw_table') {
+        // Render as markdown table
+        const cols = q.select_columns;
+        const header = `| ${cols.join(' | ')} |`;
+        const separator = `| ${cols.map(() => '---').join(' | ')} |`;
+        const body = rows.map(r => `| ${cols.map(c => r[c] ?? '').join(' | ')} |`).join('\n');
+        sections.push(`## ${q.label}\n${header}\n${separator}\n${body}`);
+      } else {
+        // For template type, pass raw rows — the label acts as section header
+        // Build a simple summary: label + row count + raw data as markdown table
+        const cols = q.select_columns;
+        const header = `| ${cols.join(' | ')} |`;
+        const separator = `| ${cols.map(() => '---').join(' | ')} |`;
+        const body = rows.slice(0, 50).map(r => `| ${cols.map(c => r[c] ?? '').join(' | ')} |`).join('\n');
+        sections.push(`## ${q.label} (${rows.length} rows)\n${header}\n${separator}\n${body}`);
+      }
+    } catch (err) {
+      console.warn(`[claude] Op context query ${q.query_key} failed:`, err.message);
     }
-    const avgScore = scoreCount > 0 ? (totalScore / scoreCount).toFixed(1) : 'N/A';
-
-    sections.push(`## Work Tickets (${tickets.length} total)
-By status: ${Object.entries(byStatus).map(([s, c]) => `${s}: ${c}`).join(', ')}
-By priority: ${Object.entries(byPriority).map(([p, c]) => `${p}: ${c}`).join(', ')}
-Top categories: ${Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c, n]) => `${c}: ${n}`).join(', ')}
-Avg quality score: ${avgScore}`);
-  }
-
-  // Job daily summary
-  const { data: daily } = await supabase
-    .from('sf_fact_job_daily')
-    .select('date_key, headcount, hours_worked, quality_score, safety_incidents, revenue, cost')
-    .eq('tenant_id', tenantId)
-    .order('date_key', { ascending: false })
-    .limit(200);
-
-  if (daily?.length) {
-    const byMonth = {};
-    for (const r of daily) {
-      const month = r.date_key?.slice(0, 7) || 'unknown';
-      if (!byMonth[month]) byMonth[month] = { headcount: 0, hours: 0, quality: 0, qualityN: 0, incidents: 0, revenue: 0, cost: 0, days: 0 };
-      const m = byMonth[month];
-      m.headcount += r.headcount || 0;
-      m.hours += r.hours_worked || 0;
-      if (r.quality_score != null) { m.quality += r.quality_score; m.qualityN++; }
-      m.incidents += r.safety_incidents || 0;
-      m.revenue += r.revenue || 0;
-      m.cost += r.cost || 0;
-      m.days++;
-    }
-
-    const months = Object.keys(byMonth).sort().reverse().slice(0, 4);
-    sections.push(`## Job Daily Performance (last ${months.length} months)
-${months.map(m => {
-  const d = byMonth[m];
-  const avgQ = d.qualityN > 0 ? (d.quality / d.qualityN).toFixed(1) : 'N/A';
-  return `${m}: ${d.hours.toFixed(0)} hrs | Quality: ${avgQ} | Safety incidents: ${d.incidents} | Revenue: $${d.revenue.toLocaleString()} | Cost: $${d.cost.toLocaleString()}`;
-}).join('\n')}`);
   }
 
   if (sections.length === 0) return null;
 
-  return `\n\n=== OPERATIONAL DATA (sf_* tables) ===
+  return `\n\n=== OPERATIONAL DATA ===
 The following is a real-time summary of this tenant's operational data. Use it to answer questions about labor, quality, timekeeping, safety, budgets, and performance.\n\n${sections.join('\n\n')}`;
 }
 
 /**
  * Fetch extracted documents for a tenant + agent and build a context block.
+ * Uses knowledge_scopes from tenant_agents DB instead of hardcoded map.
  */
 async function getKnowledgeContext(supabase, tenantId, agentKey) {
-  const departments = AGENT_DEPT_MAP[agentKey];
-  if (!departments) return null;
+  // Fetch agent config from DB
+  const { data: agentRow } = await supabase
+    .from('tenant_agents')
+    .select('knowledge_scopes, inject_operational_context')
+    .eq('tenant_id', tenantId)
+    .eq('agent_key', agentKey)
+    .single();
+
+  const departments = agentRow?.knowledge_scopes || [];
+  if (!departments.length) return null;
+
+  // Stash agent row on function scope for caller to use
+  getKnowledgeContext._lastAgent = agentRow;
 
   const { data: docs } = await supabase
     .from('tenant_documents')
@@ -407,12 +319,13 @@ router.post('/', rateLimit, async (req, res) => {
         console.log(`[claude] Injected knowledge for ${agent_key} — ${knowledgeCtx.length} chars`);
       }
 
-      // Inject operational data for analytics agent
-      if (agent_key === 'analytics') {
+      // Inject operational data for agents with inject_operational_context flag
+      const agentRow = getKnowledgeContext._lastAgent;
+      if (agentRow?.inject_operational_context) {
         const opsCtx = await getOperationalContext(req.supabase, effectiveTenantId);
         if (opsCtx) {
           enrichedSystem = enrichedSystem + opsCtx;
-          console.log(`[claude] Injected operational data for analytics — ${opsCtx.length} chars`);
+          console.log(`[claude] Injected operational data for ${agent_key} — ${opsCtx.length} chars`);
         }
       }
     }
@@ -467,6 +380,19 @@ router.post('/', rateLimit, async (req, res) => {
     if (effectiveTenantId && agent_key) {
       const modes = await getSkillExecutionModes(req.supabase, effectiveTenantId, agent_key);
       if (modes?.length) execution_context = { skills: modes };
+    }
+
+    // Fire-and-forget memory extraction from agent conversations
+    if (effectiveTenantId && agent_key && messages.length >= 4) {
+      const responseText = data.content?.[0]?.text || '';
+      if (responseText) {
+        const dept = agentRow?.knowledge_scopes?.[0] || 'general';
+        const conversationText = messages
+          .slice(-4)
+          .map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
+          .join('\n\n');
+        extractMemories(effectiveTenantId, conversationText, 'agent_interaction', null, dept);
+      }
     }
 
     res.json({ ...data, execution_context });

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import rateLimit from '../middleware/rateLimit.js';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
+import { extractMemories } from './memory.js';
 
 const router = Router();
 
@@ -355,6 +356,10 @@ router.post('/analyze', rateLimit, async (req, res) => {
         });
 
       results.push({ document_id: doc.id, analysis_id: row.id, status: 'completed', analysis });
+
+      // Fire-and-forget memory extraction from SOP analysis
+      const analysisSummary = `SOP Analysis of ${doc.file_name} (${doc.department}):\n${analysis.summary || ''}\nAutomation score: ${analysis.automation_score || 'N/A'}\nQuick wins: ${(analysis.quick_wins || []).join('; ')}`;
+      extractMemories(tenant_id, analysisSummary, 'sop_analysis', row.id, doc.department);
     } catch (err) {
       console.error(`[sop-analysis] Analysis failed for ${doc.file_name}:`, err.message);
 
@@ -493,16 +498,19 @@ router.post('/roadmap', rateLimit, async (req, res) => {
 
 // ─── Phase 2: Action Conversion & Skill Generation ─────────────────────────
 
-// Maps departments to their primary agent keys
-const DEPT_AGENT_MAP = {
-  hr: ['hr'],
-  finance: ['finance'],
-  purchasing: ['purchasing'],
-  sales: ['sales'],
-  ops: ['ops'],
-  admin: ['admin'],
-  general: ['admin'],
-};
+/**
+ * Look up agent keys for a department via DB join.
+ * Falls back to ['admin'] if no agents found.
+ */
+async function getAgentKeysForDepartment(supabase, tenantId, department) {
+  const { data: agents } = await supabase
+    .from('tenant_agents')
+    .select('agent_key, tenant_workspaces!inner(department_key)')
+    .eq('tenant_id', tenantId)
+    .eq('tenant_workspaces.department_key', department);
+
+  return agents?.length ? agents.map(a => a.agent_key) : ['admin'];
+}
 
 /**
  * POST /api/sop-analysis/convert-to-actions
@@ -554,7 +562,7 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
     .eq('status', 'completed');
 
   const sopContext = sopAnalyses?.map(a => a.analysis) || [];
-  const agentKeys = DEPT_AGENT_MAP[roadmap.department] || ['admin'];
+  const agentKeys = await getAgentKeysForDepartment(req.supabase, tenant_id, roadmap.department);
   const actions = [];
 
   // Process each phase's items

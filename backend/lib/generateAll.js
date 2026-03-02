@@ -1,9 +1,9 @@
 /**
  * Full Portal Generation Orchestrator
  *
- * Chains the three generation engines in dependency order:
+ * Chains the generation engines in dependency order:
  *   1. Workspaces + Agents (must run first)
- *   2. Tools + Dashboard Domains (parallel — both depend on workspaces)
+ *   2. Tools + Dashboard Domains + Nav + Module Registry + Op Context (parallel)
  *
  * Also auto-updates the onboarding checklist with portal_generated: true.
  */
@@ -11,15 +11,20 @@
 import { generateWorkspacesAndAgents } from './generatePortal.js';
 import { generateTools } from './generateTools.js';
 import { generateDashboardDomains } from './generateDashboards.js';
+import { generateNavSections, generateModuleRegistry } from './generateNavigation.js';
+import { generateOperationalContextQueries } from './generateOperationalContext.js';
 
 export async function generateFullPortal(supabase, tenantId) {
-  // 1. Workspaces + Agents — must exist before tools/dashboards
+  // 1. Workspaces + Agents — must exist before tools/dashboards/modules
   const { workspaces, agents } = await generateWorkspacesAndAgents(supabase, tenantId);
 
-  // 2. Tools + Dashboard Domains — both depend on workspaces, not on each other
-  const [toolsResult, domainsResult] = await Promise.all([
+  // 2. Tools + Dashboard Domains + Nav + Module Registry + Op Context — all in parallel
+  const [toolsResult, domainsResult, navResult, moduleResult, opContextResult] = await Promise.all([
     generateTools(supabase, tenantId),
     generateDashboardDomains(supabase, tenantId),
+    generateNavSections(supabase, tenantId),
+    generateModuleRegistry(supabase, tenantId),
+    generateOperationalContextQueries(supabase, tenantId),
   ]);
 
   // 3. Auto-update onboarding checklist
@@ -41,5 +46,8 @@ export async function generateFullPortal(supabase, tenantId) {
     agents,
     tools: toolsResult.tools,
     domains: domainsResult.domains,
+    navSections: navResult.navSections,
+    moduleRegistry: moduleResult.moduleRegistry,
+    operationalContextQueries: opContextResult.operationalContextQueries,
   };
 }

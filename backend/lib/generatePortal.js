@@ -131,6 +131,28 @@ Analytics-Specific Rules:
 - Never fabricate data or statistics — if data is insufficient for analysis, say what's missing.`;
 }
 
+// ─── Default workspace colors by department key ─────────
+
+const DEFAULT_DEPT_COLORS = {
+  hr: '#7C3AED',
+  finance: '#16A34A',
+  purchasing: '#D97706',
+  sales: '#2563EB',
+  ops: '#009ADE',
+  operations: '#009ADE',
+  admin: '#4B5563',
+  safety: '#DC2626',
+  quality: '#7C3AED',
+  training: '#0D9488',
+  it: '#6366F1',
+  marketing: '#EC4899',
+  legal: '#78716C',
+  facilities: '#0891B2',
+  logistics: '#EA580C',
+  engineering: '#4F46E5',
+  customer_service: '#059669',
+};
+
 // ─── Exported functions ─────────────────────────────────
 
 /**
@@ -162,7 +184,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
   await supabase.from('tenant_agents').delete().eq('tenant_id', tenantId);
   await supabase.from('tenant_workspaces').delete().eq('tenant_id', tenantId);
 
-  // 3. Create workspaces from departments
+  // 3. Create workspaces from departments (with color)
   const departments = profile.departments || [];
   const workspaceRows = departments.map((dept, i) => ({
     tenant_id: tenantId,
@@ -170,6 +192,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     name: dept.name,
     icon: dept.icon || null,
     description: dept.description || null,
+    color: dept.color || DEFAULT_DEPT_COLORS[dept.key] || '#6B7280',
     sort_order: i,
   }));
 
@@ -187,13 +210,15 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
   const wsMap = {};
   workspaces.forEach((ws) => { wsMap[ws.department_key] = ws.id; });
 
-  // 4. Create department agents (one per workspace)
+  // 4. Create department agents (one per workspace) with knowledge_scopes
   const agentRows = departments.map((dept) => ({
     tenant_id: tenantId,
     agent_key: dept.key,
     name: `${dept.name} Agent`,
     workspace_id: wsMap[dept.key] || null,
     system_prompt: buildDepartmentPrompt(profile, dept, companyName),
+    knowledge_scopes: [dept.key],
+    inject_operational_context: false,
   }));
 
   // 5. Cross-functional agents (no workspace)
@@ -203,6 +228,8 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     name: 'Admin Agent',
     workspace_id: null,
     system_prompt: buildAdminPrompt(profile, companyName),
+    knowledge_scopes: ['admin', 'general'],
+    inject_operational_context: false,
   });
 
   agentRows.push({
@@ -211,6 +238,8 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     name: 'Analytics Agent',
     workspace_id: null,
     system_prompt: buildAnalyticsPrompt(profile, companyName),
+    knowledge_scopes: ['ops', 'general'],
+    inject_operational_context: true,
   });
 
   let agents = [];
