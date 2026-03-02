@@ -207,6 +207,13 @@ export function generateWorkTickets(tenantId, jobMap, totalTickets) {
   return tickets;
 }
 
+// Sites that should consistently run over budget (>10%) to trigger labor attention items
+const LABOR_SPIKE_SITES = new Set([
+  'Gateway Logistics Hub',    // ~18% over
+  'Summit Ridge Mall',        // ~14% over
+  'Harbor Industrial Complex', // ~22% over
+]);
+
 /**
  * Generate sf_fact_labor_budget_actual rows — 12 monthly periods per site.
  */
@@ -218,12 +225,15 @@ export function generateLaborBudget(tenantId, jobMap) {
     [2025, 10], [2025, 11], [2025, 12], [2026, 1], [2026, 2],
   ];
 
-  for (const [, jobId] of Object.entries(jobMap)) {
+  for (const [jobName, jobId] of Object.entries(jobMap)) {
+    const isSpiked = LABOR_SPIKE_SITES.has(jobName);
     for (const [year, month] of months) {
       const budgetHours = randomInt(400, 900);
       const budgetDollars = budgetHours * randomFloat(20, 28);
-      // Variance 85–115% for interesting stories
-      const variancePct = randomFloat(0.85, 1.15);
+      // Spiked sites consistently run 12–25% over; normal sites 85–115%
+      const variancePct = isSpiked
+        ? randomFloat(1.12, 1.25)
+        : randomFloat(0.85, 1.15);
       const actualHours = Math.round(budgetHours * variancePct);
       const actualDollars = parseFloat((budgetDollars * variancePct).toFixed(2));
       // OT correlated with overruns
@@ -302,6 +312,18 @@ export function generateTimekeeping(tenantId, empJobMap, totalEntries) {
   return rows;
 }
 
+// Sites that should have high CA/audit ratio (>40%) to trigger quality attention items
+const QUALITY_SPIKE_SITES = new Set([
+  'Northfield University',   // ~55% CA ratio
+  'Crestwood Civic Center',  // ~48% CA ratio
+]);
+
+// Sites that should have ≥3 recordable incidents to trigger safety attention items
+const SAFETY_SPIKE_SITES = new Set([
+  'Harbor Industrial Complex', // ~5-7 incidents
+  'Gateway Logistics Hub',     // ~4-5 incidents
+]);
+
 /**
  * Generate sf_fact_job_daily rows — one per site per weekday.
  */
@@ -311,19 +333,29 @@ export function generateJobDaily(tenantId, jobMap) {
   const weekdays = getAllWeekdays(start, end);
   const rows = [];
 
-  for (const [, jobId] of Object.entries(jobMap)) {
+  for (const [jobName, jobId] of Object.entries(jobMap)) {
+    const isQualitySpiked = QUALITY_SPIKE_SITES.has(jobName);
+    const isSafetySpiked = SAFETY_SPIKE_SITES.has(jobName);
+
     for (const dateKey of weekdays) {
       const headcount = randomInt(4, 15);
+
+      // Quality: spiked sites get more CAs per audit; normal sites stay well below 40% ratio
+      const auditChance = isQualitySpiked ? 0.45 : 0.30;
+      const caChance = isQualitySpiked ? 0.35 : 0.08;
+      // Safety: spiked sites ~3% incident chance; normal ~0.4% (expect <1 per site)
+      const incidentChance = isSafetySpiked ? 0.03 : 0.004;
+
       rows.push({
         tenant_id: tenantId,
         job_id: jobId,
         date_key: dateKey,
-        audits: Math.random() < 0.30 ? randomInt(1, 3) : 0,
-        corrective_actions: Math.random() < 0.15 ? randomInt(1, 2) : 0,
-        recordable_incidents: Math.random() < 0.01 ? 1 : 0,
+        audits: Math.random() < auditChance ? randomInt(1, 3) : 0,
+        corrective_actions: Math.random() < caChance ? randomInt(1, 2) : 0,
+        recordable_incidents: Math.random() < incidentChance ? 1 : 0,
         good_saves: Math.random() < 0.10 ? randomInt(1, 2) : 0,
-        near_misses: Math.random() < 0.05 ? 1 : 0,
-        trir: randomFloat(0, 4, 2),
+        near_misses: isSafetySpiked ? (Math.random() < 0.10 ? 1 : 0) : (Math.random() < 0.05 ? 1 : 0),
+        trir: isSafetySpiked ? randomFloat(2, 6, 2) : randomFloat(0, 4, 2),
         headcount,
       });
     }
