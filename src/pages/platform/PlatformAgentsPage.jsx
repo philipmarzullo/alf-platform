@@ -51,7 +51,7 @@ export default function PlatformAgentsPage() {
         supabase.from('alf_agent_definitions').select('*').order('agent_key'),
         supabase.from('alf_tenants').select('*').order('company_name'),
         supabase.from('tenant_agent_overrides').select('tenant_id, agent_key, is_enabled, custom_prompt_additions'),
-        supabase.from('agent_instructions').select('agent_key').eq('status', 'pending'),
+        supabase.from('agent_instructions').select('agent_key, tenant_id').eq('status', 'pending'),
       ]);
 
       if (dbRes.error) throw dbRes.error;
@@ -71,10 +71,13 @@ export default function PlatformAgentsPage() {
       setTenants(tenantsRes.data || []);
       setOverrides(overridesRes.data || []);
 
-      // Build pending instruction counts per agent_key
+      // Build pending instruction counts per tenant per agent_key
+      // Structure: { [tenantId]: { [agentKey]: count } }
       const counts = {};
       for (const row of (pendingRes.data || [])) {
-        counts[row.agent_key] = (counts[row.agent_key] || 0) + 1;
+        if (!row.tenant_id) continue;
+        if (!counts[row.tenant_id]) counts[row.tenant_id] = {};
+        counts[row.tenant_id][row.agent_key] = (counts[row.tenant_id][row.agent_key] || 0) + 1;
       }
       setPendingCounts(counts);
 
@@ -192,10 +195,10 @@ export default function PlatformAgentsPage() {
                                   <span className="text-sm font-medium text-dark-text">
                                     {agent.name}
                                   </span>
-                                  {pendingCounts[agent.key] > 0 && (
+                                  {(pendingCounts[tenant.id]?.[agent.key] || 0) > 0 && (
                                     <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-orange-50 text-orange-700" title="Pending instructions">
                                       <MessageSquareText size={10} />
-                                      {pendingCounts[agent.key]}
+                                      {pendingCounts[tenant.id][agent.key]}
                                     </span>
                                   )}
                                 </div>
@@ -259,12 +262,6 @@ export default function PlatformAgentsPage() {
                               <span className="text-sm font-medium text-dark-text">
                                 {agent.name}
                               </span>
-                              {pendingCounts[agent.key] > 0 && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-orange-50 text-orange-700" title="Pending instructions">
-                                  <MessageSquareText size={10} />
-                                  {pendingCounts[agent.key]}
-                                </span>
-                              )}
                             </div>
                           </td>
                           <td className="px-4 py-2.5">
