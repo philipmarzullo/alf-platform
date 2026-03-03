@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, RefreshCw, Zap, ChevronDown, ChevronUp,
   ToggleLeft, ToggleRight, Save, AlertTriangle,
-  ClipboardList, Users, DollarSign, Shield, FileText,
+  ClipboardList, Users, DollarSign, Shield, FileText, FileSearch,
   BarChart3, Bot, Hammer,
 } from 'lucide-react';
 import { getFreshToken } from '../../../lib/supabase';
@@ -13,6 +13,7 @@ const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
 const ICON_MAP = {
   'bar-chart': BarChart3,
   'file-text': FileText,
+  'file-search': FileSearch,
   'dollar-sign': DollarSign,
   'clipboard-list': ClipboardList,
   'shield': Shield,
