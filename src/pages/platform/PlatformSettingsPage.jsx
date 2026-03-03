@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Save, Loader2, Plus, Mail, Key, Trash2, FlaskConical,
-  UserX, UserCheck, Eye, EyeOff, CheckCircle, XCircle,
+  UserX, UserCheck, Eye, EyeOff, CheckCircle, XCircle, Pencil, X,
 } from 'lucide-react';
 import { supabase, getFreshToken } from '../../lib/supabase';
 import { MODEL_OPTIONS } from '../../data/constants';
@@ -436,6 +436,10 @@ function PlatformUsersSection() {
   const [creating, setCreating] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Inline edit
+  const [editingUser, setEditingUser] = useState(null); // user id
+  const [editForm, setEditForm] = useState({ name: '', role: '' });
+
   // Action loading
   const [actionLoading, setActionLoading] = useState(null);
 
@@ -539,17 +543,58 @@ function PlatformUsersSection() {
     setActionLoading(null);
   }
 
+  function startEdit(user) {
+    setEditingUser(user.id);
+    setEditForm({ name: user.name || '', role: user.role });
+  }
+
+  async function handleSaveEdit(userId) {
+    setActionLoading(userId);
+    setError(null);
+    const { error: updateErr } = await supabase
+      .from('profiles')
+      .update({ name: editForm.name.trim(), role: editForm.role })
+      .eq('id', userId);
+
+    if (updateErr) {
+      setError(updateErr.message);
+    } else {
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, name: editForm.name.trim(), role: editForm.role } : u));
+      setEditingUser(null);
+    }
+    setActionLoading(null);
+  }
+
   const columns = [
-    { key: 'name', label: 'Name' },
+    {
+      key: 'name', label: 'Name',
+      render: (val, row) => editingUser === row.id ? (
+        <input
+          type="text"
+          value={editForm.name}
+          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+          className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-alf-orange"
+          autoFocus
+        />
+      ) : val || <span className="text-xs text-secondary-text italic">No name</span>,
+    },
     { key: 'email', label: 'Email', render: (val) => <span className="text-xs text-secondary-text">{val}</span> },
     {
       key: 'role', label: 'Role',
-      render: (val) => {
-        const styles = val === 'platform_owner'
-          ? 'bg-alf-orange/10 text-alf-orange'
-          : 'bg-purple-50 text-purple-700';
-        return <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${styles}`}>{val.replace('_', ' ')}</span>;
-      },
+      render: (val, row) => editingUser === row.id ? (
+        <select
+          value={editForm.role}
+          onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+          className="px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-alf-orange"
+        >
+          <option value="platform_owner">Platform Owner</option>
+          <option value="platform_viewer">Platform Viewer</option>
+        </select>
+      ) : (
+        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+          val === 'platform_owner' ? 'bg-alf-orange/10 text-alf-orange' : 'bg-purple-50 text-purple-700'
+        }`}>{val.replace('_', ' ')}</span>
+      ),
     },
     {
       key: 'active', label: 'Status',
@@ -561,8 +606,33 @@ function PlatformUsersSection() {
     },
     {
       key: 'id', label: 'Actions',
-      render: (_, row) => (
+      render: (_, row) => editingUser === row.id ? (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleSaveEdit(row.id); }}
+            disabled={actionLoading === row.id || !editForm.name.trim()}
+            title="Save changes"
+            className="p-1 text-green-600 hover:text-green-700 transition-colors disabled:opacity-50"
+          >
+            {actionLoading === row.id ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setEditingUser(null); }}
+            title="Cancel"
+            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
         <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); startEdit(row); }}
+            title="Edit user"
+            className="p-1 text-gray-400 hover:text-alf-orange transition-colors"
+          >
+            <Pencil size={14} />
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleResetPassword(row.email); }}
             disabled={actionLoading === row.email}
