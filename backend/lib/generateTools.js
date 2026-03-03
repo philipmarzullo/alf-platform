@@ -14,7 +14,7 @@ import { buildCompanyContext, buildSharedRules } from './generatePortal.js';
 
 // ─── Tool Definitions ───────────────────────────────────
 
-const TOOL_DEFS = [
+export const TOOL_DEFS = [
   {
     tool_key: 'qbu',
     name: 'Quarterly Review Builder',
@@ -108,7 +108,7 @@ const TOOL_DEFS = [
 
 // ─── Intake Schema Templates ────────────────────────────
 
-const INTAKE_SCHEMAS = {
+export const INTAKE_SCHEMAS = {
   qbu: [
     { key: 'clientName', label: 'Client Name', type: 'text', required: true, section: 'Cover' },
     { key: 'quarter', label: 'Quarter', type: 'text', required: true, section: 'Cover' },
@@ -230,7 +230,7 @@ function buildDifferentiatorContext(profile) {
   return `\nKey Differentiators:\n${lines.join('\n')}`;
 }
 
-function buildToolPrompt(toolKey, profile, companyName) {
+export function buildToolPrompt(toolKey, profile, companyName) {
   const context = buildCompanyContext(profile, companyName);
   const shared = buildSharedRules(companyName);
   const serviceCtx = buildServiceContext(profile);

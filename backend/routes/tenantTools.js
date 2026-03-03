@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateTools, regenerateToolPrompts } from '../lib/generateTools.js';
+import { generateTools, regenerateToolPrompts, TOOL_DEFS, INTAKE_SCHEMAS, buildToolPrompt } from '../lib/generateTools.js';
 
 const router = Router();
 
@@ -31,6 +31,8 @@ router.post('/:tenantId/generate', async (req, res) => {
 /**
  * GET /api/tenant-tools/:tenantId
  * List all tools for a tenant.
+ * Auto-backfills any catalog tools missing from tenant_tools so the
+ * admin always sees the full tool catalog regardless of tier.
  */
 router.get('/:tenantId', async (req, res) => {
   const { tenantId } = req.params;
@@ -42,7 +44,47 @@ router.get('/:tenantId', async (req, res) => {
       .order('sort_order');
 
     if (error) throw new Error(error.message);
-    return res.json({ tools: data || [] });
+    let tools = data || [];
+
+    // Auto-backfill missing catalog tools
+    const existingKeys = new Set(tools.map(t => t.tool_key));
+    const missingDefs = TOOL_DEFS.filter(def => !existingKeys.has(def.tool_key));
+
+    if (missingDefs.length > 0) {
+      const [profileRes, tenantRes, wsRes] = await Promise.all([
+        req.supabase.from('tenant_company_profiles').select('*').eq('tenant_id', tenantId).maybeSingle(),
+        req.supabase.from('alf_tenants').select('company_name').eq('id', tenantId).single(),
+        req.supabase.from('tenant_workspaces').select('id, department_key').eq('tenant_id', tenantId),
+      ]);
+
+      const profile = profileRes.data;
+      const companyName = tenantRes.data?.company_name || '';
+      const wsMap = {};
+      (wsRes.data || []).forEach(ws => { wsMap[ws.department_key] = ws.id; });
+
+      const newRows = missingDefs.map(def => ({
+        tenant_id: tenantId,
+        tool_key: def.tool_key,
+        name: def.name,
+        description: def.description,
+        icon: def.icon,
+        workspace_id: wsMap[def.dept_key] || wsMap[def.fallback_dept_key] || null,
+        agent_key: def.agent_key,
+        intake_schema: INTAKE_SCHEMAS[def.tool_key] || [],
+        system_prompt: profile ? buildToolPrompt(def.tool_key, profile, companyName) : '',
+        output_format: def.output_format,
+        max_tokens: def.max_tokens,
+        sort_order: def.sort_order,
+      }));
+
+      const { data: inserted } = await req.supabase.from('tenant_tools').insert(newRows).select();
+      if (inserted) {
+        tools = [...tools, ...inserted].sort((a, b) => a.sort_order - b.sort_order);
+      }
+      console.log(`[tenant-tools] Backfilled ${missingDefs.length} tool(s) for tenant ${tenantId}: ${missingDefs.map(d => d.tool_key).join(', ')}`);
+    }
+
+    return res.json({ tools });
   } catch (err) {
     console.error('[tenant-tools] list error:', err.message);
     return res.status(500).json({ error: err.message });
