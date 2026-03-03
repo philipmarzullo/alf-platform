@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Database, Bot, ChevronDown, ChevronRight, MessageSquareText } from 'lucide-react';
+import { Loader2, Bot, ChevronDown, ChevronRight, MessageSquareText } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 
 const DEPT_LABELS = {
@@ -38,8 +37,6 @@ export default function PlatformAgentsPage() {
   const [overrides, setOverrides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [seeding, setSeeding] = useState(false);
-  const [seedResult, setSeedResult] = useState(null);
   const [expandedTenant, setExpandedTenant] = useState(null);
   const [pendingCounts, setPendingCounts] = useState({});
 
@@ -50,8 +47,6 @@ export default function PlatformAgentsPage() {
     setError(null);
 
     try {
-      const sourceAgents = getAllSourceAgents();
-
       const [dbRes, tenantsRes, overridesRes, pendingRes] = await Promise.all([
         supabase.from('alf_agent_definitions').select('*').order('agent_key'),
         supabase.from('alf_tenants').select('*').order('company_name'),
@@ -62,43 +57,17 @@ export default function PlatformAgentsPage() {
       if (dbRes.error) throw dbRes.error;
       if (tenantsRes.error) throw tenantsRes.error;
 
-      const dbAgents = dbRes.data || [];
-      const dbMap = new Map(dbAgents.map((a) => [a.agent_key, a]));
+      const dbAgents = (dbRes.data || []).map((db) => ({
+        key: db.agent_key,
+        name: db.name || db.agent_key,
+        department: db.department || 'general',
+        model: db.model || null,
+        status: db.status || 'active',
+        systemPrompt: db.system_prompt || '',
+        actions: db.actions || [],
+      }));
 
-      // Merge: DB preferred, source-code fallback
-      const merged = sourceAgents.map((src) => {
-        const db = dbMap.get(src.key);
-        return {
-          key: src.key,
-          name: db?.name || src.name || src.key,
-          department: db?.department || src.department || 'general',
-          model: db?.model || src.model || null,
-          status: db?.status || 'active',
-          systemPrompt: db?.system_prompt || src.systemPrompt || '',
-          actions: db?.actions || (src.actions ? Object.keys(src.actions) : []),
-          inDb: !!db,
-          sourceKey: src.key,
-        };
-      });
-
-      // Add any DB-only agents not in source
-      for (const db of dbAgents) {
-        if (!sourceAgents.find((s) => s.key === db.agent_key)) {
-          merged.push({
-            key: db.agent_key,
-            name: db.name || db.agent_key,
-            department: db.department || 'general',
-            model: db.model || null,
-            status: db.status || 'active',
-            systemPrompt: db.system_prompt || '',
-            actions: db.actions || [],
-            inDb: true,
-            sourceKey: null,
-          });
-        }
-      }
-
-      setAgents(merged);
+      setAgents(dbAgents);
       setTenants(tenantsRes.data || []);
       setOverrides(overridesRes.data || []);
 
@@ -120,44 +89,6 @@ export default function PlatformAgentsPage() {
     setLoading(false);
   }
 
-  async function handleSeed() {
-    setSeeding(true);
-    setError(null);
-    setSeedResult(null);
-
-    try {
-      const sourceAgents = getAllSourceAgents();
-      const rows = sourceAgents.map((agent) => ({
-        agent_key: agent.key,
-        name: agent.name || agent.key,
-        department: agent.department || 'general',
-        model: agent.model || 'claude-sonnet-4-5-20250929',
-        system_prompt: agent.systemPrompt || '',
-        status: 'active',
-        actions: agent.actions
-          ? Object.entries(agent.actions).map(([k, v]) => ({
-              key: k,
-              label: v.label || k,
-              description: v.description || '',
-            }))
-          : [],
-      }));
-
-      const { data, error: upsertErr } = await supabase
-        .from('alf_agent_definitions')
-        .upsert(rows, { onConflict: 'agent_key' })
-        .select();
-
-      if (upsertErr) throw upsertErr;
-
-      setSeedResult(`Seeded ${data.length} agent(s) to database.`);
-      await loadData();
-    } catch (err) {
-      setError(err.message);
-    }
-    setSeeding(false);
-  }
-
   const tenantAgents = agents.filter((a) => a.department !== 'platform');
   const platformAgents = agents.filter((a) => a.department === 'platform');
 
@@ -175,29 +106,14 @@ export default function PlatformAgentsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-dark-text">Agents</h1>
-          <p className="text-sm text-secondary-text mt-1">
-            Manage agent definitions and tenant assignments
-          </p>
-        </div>
-        <button
-          onClick={handleSeed}
-          disabled={seeding || loading}
-          className="flex items-center gap-2 px-4 py-2 bg-alf-orange text-white text-sm font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
-        >
-          {seeding ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
-          {seeding ? 'Seeding...' : 'Seed All to Database'}
-        </button>
+      <div>
+        <h1 className="text-xl font-semibold text-dark-text">Agents</h1>
+        <p className="text-sm text-secondary-text mt-1">
+          Manage agent definitions and tenant assignments
+        </p>
       </div>
 
       {/* Alerts */}
-      {seedResult && (
-        <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">
-          {seedResult}
-        </div>
-      )}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
           {error}
@@ -212,7 +128,7 @@ export default function PlatformAgentsPage() {
       ) : agents.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
           <Bot size={32} className="mx-auto text-gray-300 mb-3" />
-          <p className="text-sm text-secondary-text">No agents found. Click "Seed All to Database" to populate from source.</p>
+          <p className="text-sm text-secondary-text">No agents found in the database.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -384,11 +300,6 @@ export default function PlatformAgentsPage() {
           )}
         </div>
       )}
-
-      {/* Seed help text */}
-      <p className="text-xs text-secondary-text text-center">
-        "Seed All to Database" resets all agents in the database to their source-code defaults.
-      </p>
     </div>
   );
 }

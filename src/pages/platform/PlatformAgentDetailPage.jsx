@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  ArrowLeft, Save, Loader2, RotateCcw, Zap, BookOpen, Users,
+  ArrowLeft, Save, Loader2, Users,
   ToggleLeft, ToggleRight, MessageSquareText, Plus, Check, X as XIcon,
   Globe, Building2, Upload,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { getSourceAgentConfig, getAllSourceAgents } from '../../agents/registry';
-import { classifyTemplate } from '../../agents/overrides';
 import { DEPT_COLORS, MODEL_OPTIONS } from '../../data/constants';
 import DataTable from '../../components/shared/DataTable';
 
@@ -39,14 +37,8 @@ export default function PlatformAgentDetailPage() {
     system_prompt: '',
   });
 
-  // Source-code config for comparison/reset
-  const [sourceConfig, setSourceConfig] = useState(null);
-  // DB record (null if not yet seeded)
+  // DB record (null if not yet created)
   const [dbRecord, setDbRecord] = useState(null);
-  // Source actions for display
-  const [sourceActions, setSourceActions] = useState([]);
-  // Knowledge modules
-  const [knowledgeModules, setKnowledgeModules] = useState([]);
   // Tenant assignments
   const [tenantAssignments, setTenantAssignments] = useState([]);
   // Agent instructions
@@ -66,28 +58,6 @@ export default function PlatformAgentDetailPage() {
     setError(null);
 
     try {
-      const src = getSourceAgentConfig(agentKey);
-      setSourceConfig(src);
-
-      // Extract source actions for read-only display
-      if (src?.actions) {
-        const actionList = Object.entries(src.actions).map(([key, action]) => {
-          const classification = classifyTemplate(action.promptTemplate);
-          return {
-            key,
-            label: action.label || key,
-            description: action.description || '',
-            templateType: classification.type,
-          };
-        });
-        setSourceActions(actionList);
-      } else {
-        setSourceActions([]);
-      }
-
-      // Knowledge modules
-      setKnowledgeModules(src?.knowledgeModules || []);
-
       // Fetch DB record, overrides, instructions, and tenants in parallel
       const [dbRes, overridesRes, instrRes, tenantsRes] = await Promise.all([
         supabase
@@ -115,7 +85,7 @@ export default function PlatformAgentDetailPage() {
       const db = dbRes.data;
       setDbRecord(db);
 
-      // Initialize form from DB if exists, otherwise from source
+      // Initialize form from DB
       if (db) {
         setForm({
           name: db.name || '',
@@ -123,14 +93,6 @@ export default function PlatformAgentDetailPage() {
           model: db.model || '',
           status: db.status || 'active',
           system_prompt: db.system_prompt || '',
-        });
-      } else if (src) {
-        setForm({
-          name: src.name || agentKey,
-          department: src.department || 'admin',
-          model: src.model || '',
-          status: src.status || 'active',
-          system_prompt: src.systemPrompt || '',
         });
       }
 
@@ -161,16 +123,6 @@ export default function PlatformAgentDetailPage() {
     setSaved(false);
 
     try {
-      // Build actions from source for DB storage
-      const src = getSourceAgentConfig(agentKey);
-      const actionsForDb = src?.actions
-        ? Object.entries(src.actions).map(([k, v]) => ({
-            key: k,
-            label: v.label || k,
-            description: v.description || '',
-          }))
-        : [];
-
       const row = {
         agent_key: agentKey,
         name: form.name,
@@ -178,7 +130,6 @@ export default function PlatformAgentDetailPage() {
         model: form.model,
         status: form.status,
         system_prompt: form.system_prompt,
-        actions: actionsForDb,
       };
 
       const { data, error: upsertErr } = await supabase
@@ -290,17 +241,6 @@ export default function PlatformAgentDetailPage() {
     }
   }
 
-  function handleResetToSource() {
-    if (!sourceConfig) return;
-    setForm({
-      name: sourceConfig.name || agentKey,
-      department: sourceConfig.department || 'admin',
-      model: sourceConfig.model || '',
-      status: sourceConfig.status || 'active',
-      system_prompt: sourceConfig.systemPrompt || '',
-    });
-  }
-
   function update(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -313,14 +253,14 @@ export default function PlatformAgentDetailPage() {
     );
   }
 
-  if (!sourceConfig && !dbRecord) {
+  if (!dbRecord) {
     return (
       <div className="space-y-4">
         <button onClick={() => navigate('/platform/agents')} className="flex items-center gap-2 text-sm text-secondary-text hover:text-dark-text transition-colors">
           <ArrowLeft size={16} /> Back to Agents
         </button>
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
-          Agent "{agentKey}" not found in source code or database.
+          Agent "{agentKey}" not found in the database.
         </div>
       </div>
     );
@@ -340,20 +280,11 @@ export default function PlatformAgentDetailPage() {
       </button>
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-10 rounded" style={{ backgroundColor: deptColor }} />
-          <div>
-            <h1 className="text-xl font-semibold text-dark-text">{form.name || agentKey}</h1>
-            <p className="text-sm text-secondary-text mt-0.5 font-mono">{agentKey}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {!dbRecord && (
-            <span className="px-2 py-1 text-xs font-medium rounded bg-gray-100 text-gray-500">
-              Source Only — save to create DB record
-            </span>
-          )}
+      <div className="flex items-center gap-3">
+        <div className="w-1 h-10 rounded" style={{ backgroundColor: deptColor }} />
+        <div>
+          <h1 className="text-xl font-semibold text-dark-text">{form.name || agentKey}</h1>
+          <p className="text-sm text-secondary-text mt-0.5 font-mono">{agentKey}</p>
         </div>
       </div>
 
@@ -451,66 +382,7 @@ export default function PlatformAgentDetailPage() {
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
-        {sourceConfig && (
-          <button
-            onClick={handleResetToSource}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-secondary-text border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <RotateCcw size={16} />
-            Reset to Source
-          </button>
-        )}
       </div>
-
-      {/* Read-only: Actions */}
-      {sourceActions.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <Zap size={16} className="text-secondary-text" />
-            <h2 className="text-lg font-semibold text-dark-text">Actions ({sourceActions.length})</h2>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
-            {sourceActions.map((action) => (
-              <div key={action.key} className="px-4 py-3 flex items-start gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-dark-text">{action.label}</span>
-                    <span className="font-mono text-[10px] text-secondary-text">{action.key}</span>
-                  </div>
-                  {action.description && (
-                    <p className="text-xs text-secondary-text mt-0.5">{action.description}</p>
-                  )}
-                </div>
-                <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full shrink-0 ${
-                  action.templateType === 'passthrough' ? 'bg-gray-100 text-gray-600' :
-                  action.templateType === 'simple' ? 'bg-blue-50 text-blue-700' :
-                  action.templateType === 'complex' ? 'bg-purple-50 text-purple-700' :
-                  'bg-gray-100 text-gray-500'
-                }`}>
-                  {action.templateType}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Read-only: Knowledge Modules */}
-      {knowledgeModules.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <BookOpen size={16} className="text-secondary-text" />
-            <h2 className="text-lg font-semibold text-dark-text">Knowledge Modules</h2>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {knowledgeModules.map((km) => (
-              <span key={km} className="px-3 py-1 text-xs font-medium rounded-full bg-alf-orange/10 text-alf-orange border border-alf-orange/30">
-                {km}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Read-only: Tenant Assignments */}
       <section>

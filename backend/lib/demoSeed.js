@@ -219,7 +219,7 @@ async function ensureUser(supabase, tenantId, userDef) {
     role: userDef.role,
     tenant_id: tenantId,
     active: true,
-    modules: userDef.modules,
+    // modules column deprecated — role-based nav filtering replaces it
   };
 
   const { error: profileErr } = await supabase

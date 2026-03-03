@@ -5,9 +5,52 @@
  * Called during full portal generation (generateAll.js).
  */
 
+// ── Role hierarchy for nav filtering ─────────────────────────────────
+// Higher number = more access. Used by filterNavForRole().
+const ROLE_LEVEL = {
+  user: 0,
+  manager: 1,
+  admin: 2,
+  'super-admin': 3,
+  super_admin: 3,
+  platform_owner: 4,
+};
+
 /**
- * Seed the three static nav sections (command-center, analytics, admin)
- * for a tenant. Workspaces and Tools groups remain built dynamically
+ * Filter nav sections to only include items the user's role can see.
+ * Removes empty sections after filtering.
+ *
+ * @param {Array} sections - Nav sections with items containing min_role
+ * @param {string} userRole - The user's role
+ * @param {string} [userDepartmentKey] - The user's department_key (for scope filtering)
+ * @returns {Array} Filtered sections
+ */
+export function filterNavForRole(sections, userRole, userDepartmentKey) {
+  const level = ROLE_LEVEL[userRole] ?? 0;
+  return sections
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => {
+        const minLevel = ROLE_LEVEL[item.min_role] ?? 0;
+        return level >= minLevel;
+      }),
+    }))
+    .filter(section => section.items.length > 0);
+}
+
+/**
+ * Returns the default landing route for a given role.
+ * user/manager → /portal/my-work, admin+ → /portal
+ */
+export function getDefaultRoute(userRole) {
+  const level = ROLE_LEVEL[userRole] ?? 0;
+  return level >= ROLE_LEVEL.admin ? '/portal' : '/portal/my-work';
+}
+
+/**
+ * Seed the static nav sections for a tenant.
+ * Each item has a min_role field for role-based filtering.
+ * Workspaces and Tools groups remain built dynamically
  * from tenant_workspaces / tenant_tools by the frontend.
  */
 export async function generateNavSections(supabase, tenantId) {
@@ -21,7 +64,8 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Command Center',
       sort_order: 0,
       items: [
-        { key: 'home', label: 'Command Center', path: '/portal', icon: 'LayoutDashboard' },
+        { key: 'my-work', label: 'My Work', path: '/portal/my-work', icon: 'ClipboardCheck', min_role: 'user' },
+        { key: 'home', label: 'Command Center', path: '/portal', icon: 'LayoutDashboard', min_role: 'admin' },
       ],
     },
     {
@@ -30,9 +74,9 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Analytics',
       sort_order: 1,
       items: [
-        { key: 'dashboards', label: 'Dashboards', path: '/portal/dashboards', icon: 'BarChart3', module_key: 'dashboards' },
-        { key: 'action-plans', label: 'Action Plans', path: '/portal/dashboards/action-plans', icon: 'ListChecks', module_key: 'actionPlans' },
-        { key: 'analytics-chat', label: 'Analytics Chat', path: '/portal/analytics', icon: 'MessageSquareText', module_key: 'analytics' },
+        { key: 'analytics-chat', label: 'Analytics Chat', path: '/portal/analytics', icon: 'MessageSquareText', min_role: 'user' },
+        { key: 'dashboards', label: 'Dashboards', path: '/portal/dashboards', icon: 'BarChart3', min_role: 'manager', scope: 'department' },
+        { key: 'action-plans', label: 'Action Plans', path: '/portal/dashboards/action-plans', icon: 'ListChecks', min_role: 'admin' },
       ],
     },
     {
@@ -41,8 +85,7 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Automation',
       sort_order: 3,
       items: [
-        { key: 'automation', label: 'Automation Insights', path: '/portal/admin/automation', icon: 'Zap', module_key: 'automation' },
-        { key: 'automation-preferences', label: 'Automation Preferences', path: '/portal/admin/automation-preferences', icon: 'SlidersHorizontal', module_key: 'automation', super_admin_only: true },
+        { key: 'automation', label: 'Automation', path: '/portal/admin/automation', icon: 'Zap', min_role: 'super_admin' },
       ],
     },
     {
@@ -51,12 +94,12 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Admin',
       sort_order: 4,
       items: [
-        { key: 'users', label: 'User Management', path: '/portal/admin/users', icon: 'UserCog', module_key: 'admin', admin_only: true },
-        { key: 'knowledge', label: 'Knowledge Base', path: '/portal/admin/knowledge', icon: 'BookOpen', module_key: 'knowledge' },
-        { key: 'role-templates', label: 'Role Templates', path: '/portal/admin/role-templates', icon: 'ShieldCheck', module_key: 'admin', admin_only: true },
-        { key: 'tool-builder', label: 'Tool Builder', path: '/portal/tools/custom/builder', icon: 'Wrench', module_key: 'admin', admin_only: true },
-        { key: 'connections', label: 'Connections', path: '/portal/admin/connections', icon: 'Cable', super_admin_only: true },
-        { key: 'settings', label: 'Settings', path: '/portal/admin/settings', icon: 'Settings', super_admin_only: true },
+        { key: 'knowledge', label: 'Knowledge Base', path: '/portal/admin/knowledge', icon: 'BookOpen', min_role: 'admin' },
+        { key: 'users', label: 'User Management', path: '/portal/admin/users', icon: 'UserCog', min_role: 'admin' },
+        { key: 'role-templates', label: 'Role Templates', path: '/portal/admin/role-templates', icon: 'ShieldCheck', min_role: 'admin' },
+        { key: 'tool-builder', label: 'Tool Builder', path: '/portal/tools/custom/builder', icon: 'Wrench', min_role: 'admin' },
+        { key: 'connections', label: 'Connections', path: '/portal/admin/connections', icon: 'Cable', min_role: 'super_admin' },
+        { key: 'settings', label: 'Settings', path: '/portal/admin/settings', icon: 'Settings', min_role: 'super_admin' },
       ],
     },
   ];

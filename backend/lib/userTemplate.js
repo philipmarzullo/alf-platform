@@ -7,6 +7,7 @@
  */
 
 const ADMIN_ROLES = ['admin', 'super-admin', 'platform_owner'];
+const MANAGER_ROLES = ['manager', ...ADMIN_ROLES];
 
 const ALL_DOMAINS = ['operations', 'labor', 'quality', 'timekeeping', 'safety'];
 

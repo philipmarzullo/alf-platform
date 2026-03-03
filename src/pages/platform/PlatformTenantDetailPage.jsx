@@ -16,7 +16,6 @@ import WorkspacesTab from './tabs/WorkspacesTab';
 import ToolsTab from './tabs/ToolsTab';
 import DashboardDomainsTab from './tabs/DashboardDomainsTab';
 import SopStepsTab from './tabs/SopStepsTab';
-import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
 import { TIER_KEYS, TIER_REGISTRY } from '../../data/tierRegistry';
@@ -53,8 +52,8 @@ const TABS = [
 ];
 
 // Which agents each module unlocks
-function getAgentsForModule(moduleKey, sourceAgents) {
-  return sourceAgents.filter((a) => AGENT_MODULE_MAP[a.key] === moduleKey);
+function getAgentsForModule(moduleKey, agentList) {
+  return agentList.filter((a) => AGENT_MODULE_MAP[a.agent_key || a.key] === moduleKey);
 }
 
 export default function PlatformTenantDetailPage() {
@@ -80,8 +79,6 @@ export default function PlatformTenantDetailPage() {
   const [savingModules, setSavingModules] = useState(false);
   const [savingOverride, setSavingOverride] = useState(null);
   const [error, setError] = useState(null);
-
-  const sourceAgents = getAllSourceAgents();
 
   // Editable fields
   const [editName, setEditName] = useState('');
@@ -427,7 +424,7 @@ export default function PlatformTenantDetailPage() {
       {activeTab === 'features' && (
         <FeaturesTab
           tenant={tenant}
-          sourceAgents={sourceAgents}
+          dbAgents={dbAgents}
           savingModules={savingModules}
           onToggleModule={handleToggleModule}
           onSaveModuleConfig={handleSaveModuleConfig}
@@ -438,7 +435,6 @@ export default function PlatformTenantDetailPage() {
       {activeTab === 'agents' && (
         <AgentsTab
           tenant={tenant}
-          sourceAgents={sourceAgents}
           dbAgents={dbAgents}
           agentOverrides={agentOverrides}
           savingOverride={savingOverride}
@@ -495,7 +491,7 @@ export default function PlatformTenantDetailPage() {
 
 /* ─── Features Tab ─── */
 
-function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSaveModuleConfig }) {
+function FeaturesTab({ tenant, dbAgents, savingModules, onToggleModule, onSaveModuleConfig }) {
   const moduleConfig = tenant.module_config || {};
   const [expanded, setExpanded] = useState(null);
 
@@ -548,7 +544,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
           const isExpanded = expanded === mod.key;
           const registry = MODULE_REGISTRY[mod.key];
           const config = moduleConfig[mod.key] || { pages: [], actions: [] };
-          const relatedAgents = getAgentsForModule(mod.key, sourceAgents);
+          const relatedAgents = getAgentsForModule(mod.key, dbAgents);
           const enabledPages = config.pages || [];
           const enabledActions = config.actions || [];
 
@@ -601,8 +597,8 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
                     <>
                       <span className="text-gray-300">|</span>
                       {relatedAgents.map((a) => (
-                        <span key={a.key} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                          {a.name}
+                        <span key={a.agent_key || a.key} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          {a.name || a.agent_key}
                         </span>
                       ))}
                     </>
@@ -714,7 +710,7 @@ function FeaturesTab({ tenant, sourceAgents, savingModules, onToggleModule, onSa
 
 /* ─── Agents Tab ─── */
 
-function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverride, onToggleAgent }) {
+function AgentsTab({ tenant, dbAgents, agentOverrides, savingOverride, onToggleAgent }) {
   const navigate = useNavigate();
   const tenantModules = tenant.modules || [];
   const [expandedPrompt, setExpandedPrompt] = useState(null);
@@ -762,11 +758,12 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
       </div>
 
       <div className="space-y-2">
-        {sourceAgents.map((agent) => {
-          const requiredModule = AGENT_MODULE_MAP[agent.key];
+        {dbAgents.map((agent) => {
+          const agentKey = agent.agent_key || agent.key;
+          const requiredModule = AGENT_MODULE_MAP[agentKey];
           const moduleEnabled = requiredModule === null || tenantModules.includes(requiredModule);
-          const override = agentOverrides.find((o) => o.agent_key === agent.key);
-          const hasCustomPrompt = expandedPrompt === agent.key;
+          const override = agentOverrides.find((o) => o.agent_key === agentKey);
+          const hasCustomPrompt = expandedPrompt === agentKey;
 
           let statusLabel, statusColor;
           if (!moduleEnabled) {
@@ -784,7 +781,7 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
 
           return (
             <div
-              key={agent.key}
+              key={agentKey}
               className="bg-white rounded-lg border border-gray-200 overflow-hidden"
               style={{ borderLeftColor: deptColor, borderLeftWidth: '3px' }}
             >
@@ -792,7 +789,7 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-dark-text">{agent.name}</span>
+                      <span className="text-sm font-semibold text-dark-text">{agent.name || agentKey}</span>
                       <span className="text-xs text-secondary-text capitalize">{agent.department}</span>
                     </div>
                   </div>
@@ -805,7 +802,7 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
 
                   {/* Custom prompt toggle */}
                   <button
-                    onClick={() => setExpandedPrompt(hasCustomPrompt ? null : agent.key)}
+                    onClick={() => setExpandedPrompt(hasCustomPrompt ? null : agentKey)}
                     className="text-xs text-secondary-text hover:text-alf-orange transition-colors"
                     title="Custom prompt additions"
                   >
@@ -814,7 +811,7 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
 
                   {/* Edit Agent link */}
                   <button
-                    onClick={() => navigate(`/platform/agents/${agent.key}`)}
+                    onClick={() => navigate(`/platform/agents/${agentKey}`)}
                     className="text-xs text-alf-orange hover:text-alf-orange font-medium transition-colors"
                   >
                     Edit Agent
@@ -823,11 +820,11 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
                   {/* Toggle */}
                   {moduleEnabled && (
                     <button
-                      onClick={() => onToggleAgent(agent.key, override)}
-                      disabled={savingOverride === agent.key}
+                      onClick={() => onToggleAgent(agentKey, override)}
+                      disabled={savingOverride === agentKey}
                       className="text-gray-500 hover:text-alf-orange transition-colors disabled:opacity-50"
                     >
-                      {savingOverride === agent.key ? (
+                      {savingOverride === agentKey ? (
                         <Loader2 size={20} className="animate-spin text-alf-orange" />
                       ) : (override && !override.is_enabled) ? (
                         <ToggleLeft size={24} className="text-gray-400" />
@@ -847,18 +844,18 @@ function AgentsTab({ tenant, sourceAgents, dbAgents, agentOverrides, savingOverr
                     <span className="text-xs font-semibold text-alf-orange uppercase tracking-wider">Custom Prompt Addition</span>
                   </div>
                   <textarea
-                    value={customPrompts[agent.key] || ''}
-                    onChange={(e) => setCustomPrompts((prev) => ({ ...prev, [agent.key]: e.target.value }))}
+                    value={customPrompts[agentKey] || ''}
+                    onChange={(e) => setCustomPrompts((prev) => ({ ...prev, [agentKey]: e.target.value }))}
                     rows={3}
                     className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:border-alf-orange resize-y"
                     placeholder="Additional instructions appended to this agent's system prompt for this tenant..."
                   />
                   <button
-                    onClick={() => handleSaveCustomPrompt(agent.key)}
-                    disabled={savingPrompt === agent.key}
+                    onClick={() => handleSaveCustomPrompt(agentKey)}
+                    disabled={savingPrompt === agentKey}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-alf-orange text-white text-xs font-medium rounded-lg hover:bg-alf-orange/90 disabled:opacity-50 transition-colors"
                   >
-                    {savingPrompt === agent.key ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                    {savingPrompt === agentKey ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                     Save Custom Prompt
                   </button>
                 </div>

@@ -83,10 +83,10 @@ export const DEMO_TENANTS = [
       'Westgate Technology Park',
     ],
     users: [
-      { email: 'user@apex-demo.alf.dev', role: 'user', name: 'Demo User', modules: ['dashboards'] },
-      { email: 'manager@apex-demo.alf.dev', role: 'user', name: 'Demo Manager', modules: ['dashboards', 'analytics', 'tools', 'actionPlans'] },
-      { email: 'admin@apex-demo.alf.dev', role: 'admin', name: 'Demo Admin', modules: [] },
-      { email: 'superadmin@apex-demo.alf.dev', role: 'super-admin', name: 'Demo Super Admin', modules: [] },
+      { email: 'user@apex-demo.alf.dev', role: 'user', name: 'Demo User' },
+      { email: 'manager@apex-demo.alf.dev', role: 'manager', name: 'Demo Manager' },
+      { email: 'admin@apex-demo.alf.dev', role: 'admin', name: 'Demo Admin' },
+      { email: 'superadmin@apex-demo.alf.dev', role: 'super-admin', name: 'Demo Super Admin' },
     ],
     companyProfile: {
       industry: 'Facility Services',
@@ -844,9 +844,9 @@ Immediate termination for: theft, violence, substance use on site, willful safet
       'Pineridge Towers',
     ],
     users: [
-      { email: 'user@ridgeline-demo.alf.dev', role: 'user', name: 'Demo User', modules: ['dashboards'] },
-      { email: 'manager@ridgeline-demo.alf.dev', role: 'user', name: 'Demo Manager', modules: ['dashboards', 'analytics', 'tools', 'actionPlans'] },
-      { email: 'admin@ridgeline-demo.alf.dev', role: 'admin', name: 'Demo Admin', modules: [] },
+      { email: 'user@ridgeline-demo.alf.dev', role: 'user', name: 'Demo User' },
+      { email: 'manager@ridgeline-demo.alf.dev', role: 'manager', name: 'Demo Manager' },
+      { email: 'admin@ridgeline-demo.alf.dev', role: 'admin', name: 'Demo Admin' },
     ],
     companyProfile: {
       industry: 'Facility Services',
@@ -1094,8 +1094,8 @@ Ridgeline is committed to a zero-incident workplace. Safety is everyone's respon
       'Midtown Commerce Center',
     ],
     users: [
-      { email: 'user@clearpoint-demo.alf.dev', role: 'user', name: 'Demo User', modules: ['dashboards'] },
-      { email: 'manager@clearpoint-demo.alf.dev', role: 'user', name: 'Demo Manager', modules: ['dashboards', 'analytics'] },
+      { email: 'user@clearpoint-demo.alf.dev', role: 'user', name: 'Demo User' },
+      { email: 'manager@clearpoint-demo.alf.dev', role: 'manager', name: 'Demo Manager' },
     ],
     companyProfile: {
       industry: 'Facility Services',

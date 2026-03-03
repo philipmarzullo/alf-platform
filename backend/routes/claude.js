@@ -322,19 +322,44 @@ async function getSkillExecutionModes(supabase, tenantId, agentKey) {
 }
 
 /**
+ * Resolve agent config (system prompt + model) from the database.
+ * Checks tenant_agents first (if tenant_id provided), then alf_agent_definitions.
+ */
+async function resolveAgentFromDb(supabase, agentKey, tenantId) {
+  if (tenantId) {
+    const { data: tenantAgent } = await supabase
+      .from('tenant_agents')
+      .select('system_prompt, model')
+      .eq('tenant_id', tenantId)
+      .eq('agent_key', agentKey)
+      .single();
+
+    if (tenantAgent) return tenantAgent;
+  }
+
+  const { data: platformAgent } = await supabase
+    .from('alf_agent_definitions')
+    .select('system_prompt, model')
+    .eq('agent_key', agentKey)
+    .single();
+
+  return platformAgent || null;
+}
+
+/**
  * POST /api/claude
  *
- * Proxies a Claude API call. The frontend sends the same payload it used to send
- * directly to Anthropic, but now the API key is injected server-side.
+ * Proxies a Claude API call. When system prompt is not provided in the request,
+ * resolves it from the database (tenant_agents → alf_agent_definitions fallback).
  *
- * Expected body: { model, system, messages, max_tokens, agent_key? }
+ * Expected body: { messages, agent_key, tenant_id?, model?, system?, max_tokens?, page_context? }
  */
 router.post('/', rateLimit, async (req, res) => {
-  const { model, system, messages, max_tokens, agent_key } = req.body;
+  let { model, system, messages, max_tokens, agent_key, page_context } = req.body;
 
   // Basic validation
-  if (!model || !messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'Missing required fields: model, messages' });
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'Missing required field: messages' });
   }
 
   // Resolve API key (tenant → platform DB → env fallback)
@@ -376,6 +401,24 @@ router.post('/', rateLimit, async (req, res) => {
       }
     }
   }
+
+  // Resolve system prompt + model from DB when not provided by client
+  if (!system && agent_key) {
+    const agentConfig = await resolveAgentFromDb(req.supabase, agent_key, effectiveTenantId);
+    if (agentConfig) {
+      system = agentConfig.system_prompt || '';
+      if (!model) model = agentConfig.model;
+      console.log(`[claude] Resolved ${agent_key} from DB — ${system.length} char prompt`);
+    }
+  }
+
+  // Apply page_context to system prompt
+  if (page_context && system) {
+    system += `\n\nCurrent page context: The user is currently viewing: ${page_context}. Use this context to give relevant, specific answers.`;
+  }
+
+  // Default model fallback
+  if (!model) model = 'claude-sonnet-4-5-20250929';
 
   try {
     // Enrich system prompt with tenant knowledge docs
