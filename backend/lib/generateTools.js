@@ -450,6 +450,39 @@ export async function regenerateToolPrompts(supabase, tenantId) {
 
   await Promise.all(updates.filter(Boolean));
 
+  // Insert any new tool definitions that don't exist yet for this tenant
+  const existingKeys = new Set(tools.map((t) => t.tool_key));
+  const missingDefs = TOOL_DEFS.filter((def) => !existingKeys.has(def.tool_key));
+
+  if (missingDefs.length > 0) {
+    // Fetch workspaces for workspace_id mapping
+    const { data: workspaces } = await supabase
+      .from('tenant_workspaces')
+      .select('id, department_key')
+      .eq('tenant_id', tenantId);
+
+    const wsMap = {};
+    (workspaces || []).forEach((ws) => { wsMap[ws.department_key] = ws.id; });
+
+    const newRows = missingDefs.map((def) => ({
+      tenant_id: tenantId,
+      tool_key: def.tool_key,
+      name: def.name,
+      description: def.description,
+      icon: def.icon,
+      workspace_id: wsMap[def.dept_key] || wsMap[def.fallback_dept_key] || null,
+      agent_key: def.agent_key,
+      intake_schema: INTAKE_SCHEMAS[def.tool_key] || [],
+      system_prompt: buildToolPrompt(def.tool_key, profile, companyName),
+      output_format: def.output_format,
+      max_tokens: def.max_tokens,
+      sort_order: def.sort_order,
+    }));
+
+    await supabase.from('tenant_tools').insert(newRows);
+    console.log(`[regenerateToolPrompts] Added ${newRows.length} new tool(s): ${missingDefs.map(d => d.tool_key).join(', ')}`);
+  }
+
   // Return refreshed tools
   const { data: refreshed } = await supabase
     .from('tenant_tools')
