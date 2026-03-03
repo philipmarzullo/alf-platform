@@ -93,6 +93,17 @@ const TOOL_DEFS = [
     max_tokens: 8192,
     sort_order: 6,
   },
+  {
+    tool_key: 'rfp-response',
+    name: 'RFP Response',
+    description: 'Parse RFP documents, match against your Q&A library, and generate winning responses.',
+    icon: 'file-search',
+    dept_key: 'sales',
+    agent_key: 'rfp_builder',
+    output_format: 'document',
+    max_tokens: 16384,
+    sort_order: 7,
+  },
 ];
 
 // ─── Intake Schema Templates ────────────────────────────
@@ -184,6 +195,18 @@ const INTAKE_SCHEMAS = {
     { key: 'assessmentMethod', label: 'Assessment Method', type: 'textarea' },
     { key: 'materials', label: 'Required Materials', type: 'textarea' },
     { key: 'specialNotes', label: 'Special Notes', type: 'textarea' },
+  ],
+
+  'rfp-response': [
+    { key: 'rfpName', label: 'RFP Name / Title', type: 'text', required: true },
+    { key: 'issuingOrganization', label: 'Issuing Organization', type: 'text', required: true },
+    { key: 'dueDate', label: 'Due Date', type: 'text' },
+    { key: 'serviceScope', label: 'Services Requested', type: 'textarea', required: true },
+    { key: 'facilityType', label: 'Facility Type', type: 'text' },
+    { key: 'location', label: 'Location / Region', type: 'text' },
+    { key: 'specialRequirements', label: 'Special Requirements', type: 'textarea' },
+    { key: 'emphasisAreas', label: 'Areas to Emphasize', type: 'textarea' },
+    { key: 'additionalNotes', label: 'Additional Notes', type: 'textarea' },
   ],
 };
 

@@ -37,7 +37,7 @@ export const TIER_REGISTRY = {
     description: 'Full platform with workspaces, automation, and self-service pipeline',
     modules: [
       'dashboards', 'analytics', 'tools', 'actionPlans', 'knowledge',
-      'hr', 'finance', 'purchasing', 'sales', 'ops', 'automation',
+      'hr', 'finance', 'purchasing', 'sales', 'ops', 'automation', 'rfpBuilder',
     ],
     maxUsers: 100,
     maxAgentCalls: 25_000,

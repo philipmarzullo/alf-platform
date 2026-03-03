@@ -29,6 +29,7 @@ const MODULE_PAGES = {
   sales: ['overview', 'contracts', 'apc', 'tbi'],
   ops: ['overview'],
   automation: ['insights'],
+  rfpBuilder: ['projects', 'library'],
 };
 
 const MODULE_ACTIONS = {
@@ -43,6 +44,7 @@ const MODULE_ACTIONS = {
   sales: ['renewalBrief', 'apcVarianceAnalysis', 'tbiSummary', 'pipelineSummary', 'askAgent'],
   ops: ['vpPerformanceSummary', 'inspectionAnalysis', 'askAgent'],
   automation: ['selfServicePipeline'],
+  rfpBuilder: ['parseRfp', 'matchAnswers', 'generateDraft'],
 };
 
 // ── Tier definitions ────────────────────────────────────────────────
@@ -67,7 +69,7 @@ export const TIER_REGISTRY = {
     label: 'Galaxy',
     modules: [
       'dashboards', 'analytics', 'tools', 'actionPlans', 'knowledge',
-      'hr', 'finance', 'purchasing', 'sales', 'ops', 'automation',
+      'hr', 'finance', 'purchasing', 'sales', 'ops', 'automation', 'rfpBuilder',
     ],
     maxUsers: 100,
     maxAgentCalls: 25_000,

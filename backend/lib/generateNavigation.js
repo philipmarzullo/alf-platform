@@ -198,6 +198,15 @@ export async function generateModuleRegistry(supabase, tenantId) {
       min_tier: 'galaxy',
       sort_order: 5,
     },
+    {
+      module_key: 'rfpBuilder',
+      label: 'RFP Response Builder',
+      description: 'AI-powered RFP response management with curated Q&A library',
+      icon: 'FileSearch',
+      module_type: 'platform',
+      min_tier: 'galaxy',
+      sort_order: 6,
+    },
   ];
 
   // Workspace modules (one per department)

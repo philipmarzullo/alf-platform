@@ -171,6 +171,21 @@ export const MODULE_REGISTRY = {
     ],
   },
 
+  rfpBuilder: {
+    label: 'RFP Response Builder',
+    description: 'AI-powered RFP response management with curated Q&A library',
+    icon: 'FileSearch',
+    pages: [
+      { key: 'projects', label: 'RFP Projects', path: '/tools/rfp-response', default: true },
+      { key: 'library', label: 'Q&A Library', path: '/tools/rfp-response/library' },
+    ],
+    actions: [
+      { key: 'parseRfp', label: 'Parse RFP Document' },
+      { key: 'matchAnswers', label: 'Match Library Answers' },
+      { key: 'generateDraft', label: 'Generate Draft Response' },
+    ],
+  },
+
   // Legacy module keys — kept for backward compatibility with existing DB records.
   // The "tools" umbrella module now gates all tool pages. These entries exist only
   // so that old module_config JSONB that references "qbu" or "salesDeck" doesn't
