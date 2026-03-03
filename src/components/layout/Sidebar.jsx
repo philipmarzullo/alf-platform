@@ -6,12 +6,12 @@ import useMediaQuery from '../../hooks/useMediaQuery';
 import { NAV_ITEMS } from '../../data/constants';
 import {
   LayoutDashboard, Building2, Bot, Activity, Settings,
-  Menu, X, LogOut, HardDrive,
+  Menu, X, LogOut, HardDrive, ClipboardCheck,
 } from 'lucide-react';
 import AlfMark from '../shared/AlfMark';
 
 const ICON_MAP = {
-  LayoutDashboard, Building2, Bot, Activity, Settings, HardDrive,
+  LayoutDashboard, Building2, Bot, Activity, Settings, HardDrive, ClipboardCheck,
 };
 
 export default function Sidebar() {

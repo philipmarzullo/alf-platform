@@ -15,6 +15,7 @@ import CompanyProfileTab from './tabs/CompanyProfileTab';
 import WorkspacesTab from './tabs/WorkspacesTab';
 import ToolsTab from './tabs/ToolsTab';
 import DashboardDomainsTab from './tabs/DashboardDomainsTab';
+import SopStepsTab from './tabs/SopStepsTab';
 import { getAllSourceAgents } from '../../agents/registry';
 import { DEPT_COLORS } from '../../data/constants';
 import { MODULE_REGISTRY, fullModuleConfig } from '../../data/moduleRegistry';
@@ -44,6 +45,7 @@ const TABS = [
   { key: 'api-keys', label: 'API Keys', icon: Lock },
   { key: 'brand', label: 'Brand', icon: Palette },
   { key: 'knowledge', label: 'Knowledge', icon: BookOpen },
+  { key: 'sop-steps', label: 'SOP Steps', icon: CheckCircle },
   { key: 'automation', label: 'Automation', icon: FlaskConical },
   { key: 'dashboards', label: 'Dashboards', icon: BarChart3 },
   { key: 'backup', label: 'Backup', icon: HardDrive },
@@ -463,6 +465,11 @@ export default function PlatformTenantDetailPage() {
       {/* Knowledge Tab */}
       {activeTab === 'knowledge' && (
         <KnowledgeTab tenantId={id} />
+      )}
+
+      {/* SOP Steps Tab */}
+      {activeTab === 'sop-steps' && (
+        <SopStepsTab tenantId={id} />
       )}
 
       {/* Automation Tab */}

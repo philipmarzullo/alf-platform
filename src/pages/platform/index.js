@@ -7,3 +7,4 @@ export { default as PlatformAgentDetailPage } from './PlatformAgentDetailPage';
 export { default as PlatformUsagePage } from './PlatformUsagePage';
 export { default as PlatformSettingsPage } from './PlatformSettingsPage';
 export { default as PlatformBackupsPage } from './PlatformBackupsPage';
+export { default as PlatformMyWorkPage } from './PlatformMyWorkPage';

@@ -23,6 +23,8 @@ import memoryRouter from './routes/memory.js';
 import subscriptionRouter from './routes/subscription.js';
 import demoResetRouter from './routes/demoReset.js';
 import metricsRouter from './routes/metrics.js';
+import sopAssignmentsRouter from './routes/sopAssignments.js';
+import userTasksRouter from './routes/userTasks.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -87,6 +89,8 @@ app.use('/api/memory', auth, memoryRouter);
 app.use('/api/subscription', auth, subscriptionRouter);
 app.use('/api/tenants', auth, demoResetRouter);
 app.use('/api/metrics', auth, metricsRouter);
+app.use('/api/sop-assignments', auth, sopAssignmentsRouter);
+app.use('/api/user-tasks', auth, userTasksRouter);
 
 // --- 404 ---
 app.use((req, res) => {

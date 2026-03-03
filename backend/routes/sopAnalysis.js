@@ -36,6 +36,16 @@ ${text}
 Return JSON matching this exact schema:
 {
   "summary": "string — 1-2 sentence description of what this SOP covers",
+  "steps": [
+    {
+      "step_number": 1,
+      "description": "string — what this discrete step involves",
+      "classification": "automated|hybrid|manual",
+      "frequency": "daily|weekly|monthly|quarterly|as-needed",
+      "current_effort_minutes": 15,
+      "complexity": "low|medium|high"
+    }
+  ],
   "manual_steps": [
     {
       "step_number": 1,
@@ -61,7 +71,12 @@ Return JSON matching this exact schema:
   "long_term_items": ["string — one-liner bigger projects"],
   "automation_score": 72,
   "automation_readiness": "high|medium|low"
-}`;
+}
+
+IMPORTANT for "steps": Break the SOP into every discrete step. Each step gets classified:
+- "automated": Can be fully handled by an AI agent or workflow automation
+- "hybrid": Agent can draft/assist but a human must review or approve
+- "manual": Requires human judgment, physical presence, or compliance authority`;
 
 const ROADMAP_SYSTEM_PROMPT = `You are a process automation strategist for facility services companies. You aggregate individual SOP analyses into a phased automation roadmap for a department.
 
@@ -355,6 +370,44 @@ router.post('/analyze', rateLimit, async (req, res) => {
           if (error) console.warn('[sop-analysis] Usage log failed:', error.message);
         });
 
+      // Write structured steps to tenant_sop_steps
+      if (analysis.steps?.length) {
+        // Look up workspace for this department
+        const { data: workspace } = await req.supabase
+          .from('tenant_workspaces')
+          .select('id')
+          .eq('tenant_id', tenant_id)
+          .eq('department_key', doc.department)
+          .single();
+
+        // Delete existing steps for this analysis (re-run safe)
+        await req.supabase
+          .from('tenant_sop_steps')
+          .delete()
+          .eq('sop_analysis_id', row.id);
+
+        const stepRows = analysis.steps.map(s => ({
+          tenant_id,
+          sop_analysis_id: row.id,
+          document_id: doc.id,
+          workspace_id: workspace?.id || null,
+          department: doc.department,
+          step_number: s.step_number,
+          step_description: s.description,
+          classification: s.classification || 'manual',
+        }));
+
+        const { error: stepsErr } = await req.supabase
+          .from('tenant_sop_steps')
+          .insert(stepRows);
+
+        if (stepsErr) {
+          console.warn(`[sop-analysis] Steps insert failed for ${doc.file_name}:`, stepsErr.message);
+        } else {
+          console.log(`[sop-analysis] Wrote ${stepRows.length} steps for ${doc.file_name}`);
+        }
+      }
+
       results.push({ document_id: doc.id, analysis_id: row.id, status: 'completed', analysis });
 
       // Fire-and-forget memory extraction from SOP analysis
@@ -606,6 +659,30 @@ router.post('/convert-to-actions', rateLimit, async (req, res) => {
         if (insertErr) {
           console.error('[sop-analysis] Action insert error:', insertErr.message);
           continue;
+        }
+
+        // Back-link matching SOP steps to this automation action
+        if (actionRow && item.source_sop) {
+          const stepClassification = classification.assignee_type === 'agent' ? 'automated'
+            : classification.assignee_type === 'hybrid' ? 'hybrid' : 'manual';
+
+          // Find steps from the same source SOP with matching classification
+          const { data: matchingSteps } = await req.supabase
+            .from('tenant_sop_steps')
+            .select('id')
+            .eq('tenant_id', tenant_id)
+            .eq('department', roadmap.department)
+            .eq('classification', stepClassification)
+            .is('automation_action_id', null);
+
+          // Link unlinked steps from this department that match the classification
+          if (matchingSteps?.length) {
+            // Link the first unlinked matching step
+            await req.supabase
+              .from('tenant_sop_steps')
+              .update({ automation_action_id: actionRow.id })
+              .eq('id', matchingSteps[0].id);
+          }
         }
 
         // Log usage
@@ -1036,6 +1113,49 @@ router.get('/results', async (req, res) => {
   } catch (err) {
     console.error('[sop-analysis] Results fetch error:', err.message);
     res.status(500).json({ error: 'Failed to fetch results' });
+  }
+});
+
+/**
+ * GET /api/sop-analysis/steps
+ *
+ * Fetch SOP steps for a tenant, optionally filtered by document or department.
+ * Query: ?tenant_id=...&document_id=...&department=...
+ */
+router.get('/steps', async (req, res) => {
+  const { tenant_id, document_id, department } = req.query;
+
+  let effectiveTenantId = req.tenantId;
+  if (tenant_id && PLATFORM_ROLES.includes(req.user?.role)) {
+    effectiveTenantId = tenant_id;
+  }
+
+  if (!effectiveTenantId) {
+    return res.status(400).json({ error: 'tenant_id required' });
+  }
+
+  try {
+    let query = req.supabase
+      .from('tenant_sop_steps')
+      .select(`
+        *,
+        tenant_documents!inner(file_name, title),
+        automation_actions(id, title, status, assignee_type),
+        tenant_sop_assignments(id, assigned_to_user_id, assigned_to_role, assignment_type, profiles!assigned_to_user_id(name, email))
+      `)
+      .eq('tenant_id', effectiveTenantId)
+      .order('step_number');
+
+    if (document_id) query = query.eq('document_id', document_id);
+    if (department) query = query.eq('department', department);
+
+    const { data: steps, error: err } = await query;
+    if (err) throw err;
+
+    res.json({ steps: steps || [] });
+  } catch (err) {
+    console.error('[sop-analysis] Steps fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch steps' });
   }
 });
 

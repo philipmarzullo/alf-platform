@@ -17,6 +17,7 @@ import {
   PlatformUsagePage,
   PlatformSettingsPage,
   PlatformBackupsPage,
+  PlatformMyWorkPage,
 } from './pages/platform';
 import { Loader2 } from 'lucide-react';
 import AlfMark from './components/shared/AlfMark';
@@ -26,6 +27,7 @@ function usePageContext() {
   if (pathname === '/') return 'Dashboard — platform overview with tenant and usage summaries';
   if (pathname === '/platform/tenants') return 'Tenants list — managing all tenant organizations';
   if (pathname.startsWith('/platform/tenants/')) return 'Tenant detail — viewing a specific tenant\'s config, users, agents, API keys, and branding';
+  if (pathname === '/platform/my-work') return 'My Work — task queue from SOP assignments and agent outputs';
   if (pathname === '/platform/agents') return 'Agents — managing global agent definitions, models, and system prompts';
   if (pathname.startsWith('/platform/agents/')) return 'Agent detail — editing agent config, viewing tenant assignments';
   if (pathname === '/platform/usage') return 'Usage — viewing agent call logs and token consumption';
@@ -106,6 +108,7 @@ export default function App() {
           <Route path="/platform/agents" element={<PlatformAgentsPage />} />
           <Route path="/platform/agents/:agentKey" element={<PlatformAgentDetailPage />} />
           <Route path="/platform/usage" element={<PlatformUsagePage />} />
+          <Route path="/platform/my-work" element={<PlatformMyWorkPage />} />
           <Route path="/platform/backups" element={<PlatformBackupsPage />} />
           <Route path="/platform/settings" element={<PlatformSettingsPage />} />
           {/* Redirects from old routes */}

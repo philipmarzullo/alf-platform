@@ -50,6 +50,7 @@ export const NAV_ITEMS = [
   {
     group: 'MONITOR',
     items: [
+      { label: 'My Work', path: '/platform/my-work', icon: 'ClipboardCheck' },
       { label: 'Usage & Analytics', path: '/platform/usage', icon: 'Activity' },
       { label: 'Backups', path: '/platform/backups', icon: 'HardDrive' },
     ],

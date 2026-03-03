@@ -184,6 +184,26 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     context += '\n\n=== AUTOMATION SKILLS ===\n';
     context += 'You have the following enhanced capabilities based on SOP analysis:\n\n';
 
+    // Look up SOP step assignments for each skill to inject routing context
+    const skillStepAssignments = {};
+    const { data: stepAssignments } = await supabase
+      .from('tenant_sop_steps')
+      .select(`
+        automation_action_id,
+        tenant_sop_assignments(assignment_type, assigned_to_role,
+          profiles!assigned_to_user_id(name)
+        )
+      `)
+      .eq('tenant_id', tenantId)
+      .in('automation_action_id', skills.map(s => s.id))
+      .not('automation_action_id', 'is', null);
+
+    for (const sa of (stepAssignments || [])) {
+      if (sa.tenant_sop_assignments?.length) {
+        skillStepAssignments[sa.automation_action_id] = sa.tenant_sop_assignments;
+      }
+    }
+
     const skillBlocks = skills.map(s => {
       const mode = prefMap[s.id] || 'review'; // default to review if no pref set
       let modeInstruction = '';
@@ -193,7 +213,26 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
         modeInstruction = '\n[EXECUTION MODE: REVIEW] — Generate your output and mark it "[PENDING REVIEW]" at the top. Include a brief summary of what will happen if approved. The user must approve before this takes effect.';
       }
       // 'automated' mode = no additional instruction, agent acts with full authority
-      return `### ${s.title}\n${s.agent_skill_prompt}${modeInstruction}`;
+
+      // Inject assignment routing awareness
+      const assignments = skillStepAssignments[s.id] || [];
+      let routingNote = '';
+      if (assignments.length) {
+        const reviewer = assignments.find(a => a.assignment_type === 'reviewer');
+        const owner = assignments.find(a => a.assignment_type === 'owner');
+        const targets = [];
+        if (reviewer) {
+          targets.push(`reviewer: ${reviewer.profiles?.name || reviewer.assigned_to_role || 'unspecified'}`);
+        }
+        if (owner) {
+          targets.push(`owner: ${owner.profiles?.name || owner.assigned_to_role || 'unspecified'}`);
+        }
+        if (targets.length) {
+          routingNote = `\n[ROUTING] After completing this task, output will be routed to ${targets.join(', ')}. Do not present output as final if a reviewer is assigned.`;
+        }
+      }
+
+      return `### ${s.title}\n${s.agent_skill_prompt}${modeInstruction}${routingNote}`;
     });
 
     context += skillBlocks.join('\n\n');
@@ -415,6 +454,71 @@ router.post('/', rateLimit, async (req, res) => {
     if (effectiveTenantId && agent_key) {
       const modes = await getSkillExecutionModes(req.supabase, effectiveTenantId, agent_key);
       if (modes?.length) execution_context = { skills: modes };
+    }
+
+    // Fire-and-forget: route agent output to user tasks for draft/review modes
+    if (effectiveTenantId && agent_key && execution_context?.skills?.length) {
+      const responseText = data.content?.[0]?.text || '';
+      for (const skill of execution_context.skills) {
+        if (skill.mode === 'automated') continue;
+        // Check if the response mentions this skill's output markers
+        const isDraft = responseText.includes('[DRAFT]') && skill.mode === 'draft';
+        const isReview = responseText.includes('[PENDING REVIEW]') && skill.mode === 'review';
+        if (!isDraft && !isReview) continue;
+
+        // Look up SOP step assignments for this skill
+        req.supabase
+          .from('tenant_sop_steps')
+          .select(`
+            id,
+            tenant_sop_assignments(id, assigned_to_user_id, assigned_to_role, assignment_type)
+          `)
+          .eq('tenant_id', effectiveTenantId)
+          .eq('automation_action_id', skill.skill_id)
+          .then(async ({ data: steps }) => {
+            if (!steps?.length) return;
+            for (const step of steps) {
+              const assignments = step.tenant_sop_assignments || [];
+              // Find reviewer or owner to route to
+              const target = assignments.find(a => a.assignment_type === 'reviewer')
+                || assignments.find(a => a.assignment_type === 'owner');
+              if (!target) continue;
+
+              // Resolve user IDs from role if needed
+              let userIds = [];
+              if (target.assigned_to_user_id) {
+                userIds = [target.assigned_to_user_id];
+              } else if (target.assigned_to_role) {
+                const { data: roleUsers } = await req.supabase
+                  .from('profiles')
+                  .select('id')
+                  .eq('tenant_id', effectiveTenantId)
+                  .eq('role', target.assigned_to_role);
+                userIds = (roleUsers || []).map(u => u.id);
+              }
+
+              // Create tasks for each target user
+              for (const uid of userIds) {
+                await req.supabase
+                  .from('tenant_user_tasks')
+                  .insert({
+                    tenant_id: effectiveTenantId,
+                    user_id: uid,
+                    sop_step_id: step.id,
+                    sop_assignment_id: target.id,
+                    source_type: 'agent_output',
+                    source_reference_id: skill.skill_id,
+                    title: `${isDraft ? 'Review draft' : 'Approve'}: ${skill.title}`,
+                    description: `Agent produced ${isDraft ? 'a draft' : 'output pending review'} for "${skill.title}". Please review and take action.`,
+                    agent_output: { text: responseText, model, agent_key },
+                  });
+              }
+            }
+          })
+          .catch(err => {
+            console.warn('[claude] Task routing failed:', err.message);
+          });
+      }
     }
 
     // Fire-and-forget memory extraction from agent conversations
