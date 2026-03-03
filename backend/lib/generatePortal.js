@@ -131,6 +131,58 @@ Analytics-Specific Rules:
 - Never fabricate data or statistics — if data is insufficient for analysis, say what's missing.`;
 }
 
+function buildRFPBuilderPrompt(profile, companyName) {
+  const context = buildCompanyContext(profile, companyName);
+  const shared = buildSharedRules(companyName);
+
+  // Service catalog
+  const serviceCatalog = profile.service_catalog || [];
+  let serviceContext = '';
+  if (serviceCatalog.length > 0) {
+    const lines = serviceCatalog.map(
+      (cat) => `- ${cat.category}: ${(cat.services || []).join(', ')}`
+    );
+    serviceContext = `\n\nCompany Service Catalog:\n${lines.join('\n')}`;
+  }
+
+  // Differentiators
+  const diffs = profile.differentiators || [];
+  let diffContext = '';
+  if (diffs.length > 0) {
+    const lines = diffs.map(
+      (d) => `- ${d.label}${d.description ? ': ' + d.description : ''}`
+    );
+    diffContext = `\n\nKey Differentiators:\n${lines.join('\n')}`;
+  }
+
+  // Tech platforms
+  const techPlatforms = profile.technology_platforms || [];
+  let techContext = '';
+  if (techPlatforms.length > 0) {
+    const lines = techPlatforms.map(
+      (tp) => `- ${tp.name}${tp.description ? ': ' + tp.description : ''}`
+    );
+    techContext = `\n\nTechnology Platforms:\n${lines.join('\n')}`;
+  }
+
+  return `You are the RFP Response Agent for ${companyName}. You help draft precise, winning responses to Requests for Proposals by drawing on deep cross-functional knowledge of the company — safety, HR, operations, finance, sales, and compliance.
+
+${context}${serviceContext}${diffContext}${techContext}
+
+${shared}
+
+RFP Response-Specific Rules:
+- Draw from ALL departments — RFPs span safety records, HR policies, financial stability, operational capabilities, and compliance certifications.
+- Leverage company certifications (${(profile.certifications || []).join(', ') || 'as listed'}) as compliance proof points.
+- Reference key leadership for organizational structure and qualification questions.
+- Use the service catalog to match requested services with specific ${companyName} capabilities.
+- Cite differentiators as competitive positioning — weave them into responses naturally.
+- Never fabricate TRIR, EMR, turnover rates, or financial data — use injected operational data when available, otherwise flag as "data needed from [department]".
+- When a Q&A library is available in context, prefer previously approved answers for matching or similar questions. Adapt wording to fit the specific RFP context.
+- Format responses to match RFP structure — numbered, section-aligned, directly answering each requirement.
+- Tone: confident, precise, compliant — match the formality expected in government and institutional RFPs.`;
+}
+
 // ─── Default workspace colors by department key ─────────
 
 const DEFAULT_DEPT_COLORS = {
@@ -242,6 +294,16 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     inject_operational_context: true,
   });
 
+  agentRows.push({
+    tenant_id: tenantId,
+    agent_key: 'rfp_builder',
+    name: 'RFP Response Agent',
+    workspace_id: null,
+    system_prompt: buildRFPBuilderPrompt(profile, companyName),
+    knowledge_scopes: [...departments.map((d) => d.key), 'general'],
+    inject_operational_context: true,
+  });
+
   let agents = [];
   if (agentRows.length > 0) {
     const { data, error } = await supabase
@@ -298,6 +360,8 @@ export async function regenerateAgentPrompts(supabase, tenantId) {
       newPrompt = buildAdminPrompt(profile, companyName);
     } else if (agent.agent_key === 'analytics') {
       newPrompt = buildAnalyticsPrompt(profile, companyName);
+    } else if (agent.agent_key === 'rfp_builder') {
+      newPrompt = buildRFPBuilderPrompt(profile, companyName);
     } else if (deptMap[agent.agent_key]) {
       newPrompt = buildDepartmentPrompt(profile, deptMap[agent.agent_key], companyName);
     } else {

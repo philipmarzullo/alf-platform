@@ -160,6 +160,26 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
     context += `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
   }
 
+  // Inject RFP Q&A library for the rfp_builder agent
+  if (agentKey === 'rfp_builder') {
+    const { data: qaEntries } = await supabase
+      .from('tenant_rfp_answers')
+      .select('question, answer, category, tags, win_count, use_count')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .order('win_count', { ascending: false })
+      .limit(50);
+
+    if (qaEntries?.length) {
+      context += '\n\n=== RFP Q&A LIBRARY ===\n';
+      context += 'The following are previously curated and approved Q&A pairs. Prefer these answers when the question matches or is similar. Adapt wording to fit the specific RFP context.\n\n';
+      context += qaEntries.map(qa =>
+        `[${qa.category}] Q: ${qa.question}\nA: ${qa.answer}${qa.win_count > 0 ? ` (used in ${qa.win_count} winning response${qa.win_count > 1 ? 's' : ''})` : ''}`
+      ).join('\n\n');
+      console.log(`[claude] Injected ${qaEntries.length} RFP Q&A entries for rfp_builder`);
+    }
+  }
+
   // Inject active automation skills for this agent, respecting execution mode
   const { data: skills } = await supabase
     .from('automation_actions')
