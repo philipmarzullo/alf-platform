@@ -471,24 +471,18 @@ function PlatformUsersSection() {
     try {
       const token = await getFreshToken();
       if (!token) throw new Error('Not authenticated — please sign in again');
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`;
 
-      const res = await fetch(functionUrl, {
+      const res = await fetch(`${BACKEND_URL}/api/platform-users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': anonKey,
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           email: form.email.trim(),
           password: form.password,
           name: form.name.trim(),
-          title: '',
           role: form.role,
-          modules: [],
-          tenant_id: null,
         }),
       });
 
@@ -504,7 +498,7 @@ function PlatformUsersSection() {
         await loadUsers();
       }
     } catch (err) {
-      setError('Could not reach admin-create-user: ' + err.message);
+      setError('Failed to create user: ' + err.message);
     }
     setCreating(false);
   }

@@ -25,6 +25,7 @@ import demoResetRouter from './routes/demoReset.js';
 import metricsRouter from './routes/metrics.js';
 import sopAssignmentsRouter from './routes/sopAssignments.js';
 import userTasksRouter from './routes/userTasks.js';
+import platformUsersRouter from './routes/platformUsers.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -91,6 +92,7 @@ app.use('/api/tenants', auth, demoResetRouter);
 app.use('/api/metrics', auth, metricsRouter);
 app.use('/api/sop-assignments', auth, sopAssignmentsRouter);
 app.use('/api/user-tasks', auth, userTasksRouter);
+app.use('/api/platform-users', auth, platformUsersRouter);
 
 // --- 404 ---
 app.use((req, res) => {
