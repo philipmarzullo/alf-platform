@@ -26,6 +26,8 @@ import metricsRouter from './routes/metrics.js';
 import sopAssignmentsRouter from './routes/sopAssignments.js';
 import userTasksRouter from './routes/userTasks.js';
 import platformUsersRouter from './routes/platformUsers.js';
+import connectionsRouter from './routes/connections.js';
+import integrationsRouter from './routes/integrations.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -93,6 +95,8 @@ app.use('/api/metrics', auth, metricsRouter);
 app.use('/api/sop-assignments', auth, sopAssignmentsRouter);
 app.use('/api/user-tasks', auth, userTasksRouter);
 app.use('/api/platform-users', auth, platformUsersRouter);
+app.use('/api/connections', auth, connectionsRouter);
+app.use('/api/integrations', auth, integrationsRouter);
 
 // --- 404 ---
 app.use((req, res) => {

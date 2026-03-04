@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { encryptCredential, decryptCredential } from '../lib/credentials.js';
 import auth from '../middleware/auth.js';
+import { upsertConnection, removeConnection } from './connections.js';
 
 const router = Router();
 
@@ -13,7 +14,7 @@ const supabase = createClient(
 
 // Microsoft OAuth constants
 const MS_AUTHORITY = 'https://login.microsoftonline.com/common/oauth2/v2.0';
-const MS_SCOPES = 'openid profile email offline_access User.Read';
+const MS_SCOPES = 'openid profile email offline_access User.Read Mail.Send';
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // ─── HMAC-signed stateless state param ───────────────────────────────────────
@@ -290,6 +291,21 @@ router.get('/microsoft/callback', async (req, res) => {
       user: { id: userId, name: userName },
     });
 
+    // Register in connection registry
+    try {
+      await upsertConnection({
+        tenantId,
+        connectionType: 'email',
+        provider: 'microsoft_365',
+        status: 'connected',
+        capabilities: ['can_send_email', 'can_read_calendar'],
+        metadata: { user_email: msUser.email, user_name: msUser.name },
+        credentialId: cred?.id,
+      });
+    } catch (connErr) {
+      console.warn('[oauth] Connection registry upsert failed (non-fatal):', connErr.message);
+    }
+
     console.log(`[oauth] Microsoft connected for tenant ${tenantId} (${msUser.email})`);
 
     if (portalUrl) {
@@ -411,6 +427,13 @@ router.post('/microsoft/disconnect', auth, requireOAuthAccess, async (req, res) 
       .eq('id', cred.id);
 
     if (error) throw error;
+
+    // Remove from connection registry
+    try {
+      await removeConnection(tenantId, 'email', 'microsoft_365');
+    } catch (connErr) {
+      console.warn('[oauth] Connection registry remove failed (non-fatal):', connErr.message);
+    }
 
     logOAuthAction({
       tenantId,

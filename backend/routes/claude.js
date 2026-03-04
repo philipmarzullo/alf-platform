@@ -465,6 +465,24 @@ router.post('/', rateLimit, async (req, res) => {
       if (instructionsCtx) {
         enrichedSystem = enrichedSystem + instructionsCtx;
       }
+
+      // Inject connected integrations context
+      const { data: tenantConns } = await req.supabase
+        .from('tenant_connections')
+        .select('connection_type, provider, capabilities')
+        .eq('tenant_id', effectiveTenantId)
+        .eq('status', 'connected');
+      if (tenantConns?.length) {
+        const caps = tenantConns.flatMap(c => c.capabilities || []);
+        const parts = ['\n\n=== CONNECTED INTEGRATIONS ==='];
+        if (caps.includes('can_send_email')) {
+          parts.push('This tenant has email connected. Format email drafts with clear Subject: line and body.');
+          parts.push('The user can send drafts directly via My Work.');
+        }
+        if (parts.length > 1) {
+          enrichedSystem = enrichedSystem + parts.join('\n');
+        }
+      }
     }
 
     const anthropicResponse = await fetch(ANTHROPIC_URL, {
@@ -523,7 +541,60 @@ router.post('/', rateLimit, async (req, res) => {
     if (effectiveTenantId && agent_key && execution_context?.skills?.length) {
       const responseText = data.content?.[0]?.text || '';
       for (const skill of execution_context.skills) {
-        if (skill.mode === 'automated') continue;
+        // Automated mode: attempt email send if tenant has email connected
+        if (skill.mode === 'automated') {
+          const subjectLine = responseText.match(/^Subject:\s*(.+)$/m);
+          const toLine = responseText.match(/^To:\s*(.+)$/m);
+          if (subjectLine && toLine) {
+            // Check for email connection
+            const { data: emailConn } = await req.supabase
+              .from('tenant_connections')
+              .select('id')
+              .eq('tenant_id', effectiveTenantId)
+              .eq('connection_type', 'email')
+              .eq('status', 'connected')
+              .maybeSingle();
+            if (emailConn) {
+              // Fire-and-forget auto-send
+              (async () => {
+                try {
+                  const { getValidMsToken } = await import('../lib/msTokens.js');
+                  const token = await getValidMsToken(effectiveTenantId);
+                  const emailBody = responseText
+                    .replace(/^Subject:\s*.+$/m, '')
+                    .replace(/^To:\s*.+$/m, '')
+                    .trim();
+                  const toAddresses = toLine[1].split(',').map(e => e.trim()).filter(Boolean);
+                  const graphRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+                    method: 'POST',
+                    headers: {
+                      Authorization: `Bearer ${token.access_token}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      message: {
+                        subject: subjectLine[1].trim(),
+                        body: { contentType: 'HTML', content: `<div style="font-family:sans-serif;font-size:14px;line-height:1.6;">${emailBody.replace(/\n/g, '<br>')}</div>` },
+                        toRecipients: toAddresses.map(e => ({ emailAddress: { address: e } })),
+                      },
+                      saveToSentItems: true,
+                    }),
+                  });
+                  if (graphRes.ok) {
+                    console.log(`[claude] Auto-sent email for skill "${skill.title}" to ${toAddresses.join(', ')}`);
+                    const { recordActionExecution } = await import('./automationPreferences.js');
+                    recordActionExecution(effectiveTenantId, agent_key, skill.skill_id, 'agent_skill', false);
+                  } else {
+                    console.warn(`[claude] Auto-send failed: ${graphRes.status}`);
+                  }
+                } catch (err) {
+                  console.warn('[claude] Automated email send failed:', err.message);
+                }
+              })();
+            }
+          }
+          continue;
+        }
         // Check if the response mentions this skill's output markers
         const isDraft = responseText.includes('[DRAFT]') && skill.mode === 'draft';
         const isReview = responseText.includes('[PENDING REVIEW]') && skill.mode === 'review';
