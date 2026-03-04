@@ -74,7 +74,6 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Analytics',
       sort_order: 1,
       items: [
-        { key: 'analytics-chat', label: 'Analytics Chat', path: '/portal/analytics', icon: 'MessageSquareText', min_role: 'user' },
         { key: 'dashboards', label: 'Dashboards', path: '/portal/dashboards', icon: 'BarChart3', min_role: 'manager', scope: 'department' },
         { key: 'action-plans', label: 'Action Plans', path: '/portal/dashboards/action-plans', icon: 'ListChecks', min_role: 'admin' },
       ],
@@ -94,7 +93,7 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Admin',
       sort_order: 4,
       items: [
-        { key: 'knowledge', label: 'Agent Knowledge', path: '/portal/admin/knowledge', icon: 'BookOpen', min_role: 'admin' },
+        { key: 'knowledge', label: 'Knowledge Base', path: '/portal/admin/knowledge', icon: 'BookOpen', min_role: 'admin' },
         { key: 'agents', label: 'Agent Factory', path: '/portal/admin/agents', icon: 'Bot', min_role: 'admin' },
         { key: 'users', label: 'User Management', path: '/portal/admin/users', icon: 'UserCog', min_role: 'admin' },
         { key: 'role-templates', label: 'Role Templates', path: '/portal/admin/role-templates', icon: 'ShieldCheck', min_role: 'admin' },
@@ -183,7 +182,7 @@ export async function generateModuleRegistry(supabase, tenantId) {
     },
     {
       module_key: 'knowledge',
-      label: 'Agent Knowledge',
+      label: 'Knowledge Base',
       description: 'Company SOPs, documents, and agent knowledge',
       icon: 'BookOpen',
       module_type: 'platform',
