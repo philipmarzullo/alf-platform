@@ -304,6 +304,17 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     inject_operational_context: true,
   });
 
+  // Tool-specific agents — broad knowledge access for cross-functional tools
+  agentRows.push({
+    tenant_id: tenantId,
+    agent_key: 'qbu',
+    name: 'QBU Builder',
+    workspace_id: null,
+    system_prompt: '', // Frontend provides the system prompt
+    knowledge_scopes: [...departments.map((d) => d.key), 'general'],
+    inject_operational_context: false,
+  });
+
   let agents = [];
   if (agentRows.length > 0) {
     const { data, error } = await supabase
@@ -376,6 +387,25 @@ export async function regenerateAgentPrompts(supabase, tenantId) {
   });
 
   await Promise.all(updates.filter(Boolean));
+
+  // Insert missing cross-functional agents (e.g. 'qbu' for existing tenants)
+  const existingKeys = new Set(agents.map((a) => a.agent_key));
+  const departments = profile.departments || [];
+  const allDeptKeys = departments.map((d) => d.key);
+
+  const missingCrossFunctional = [
+    { agent_key: 'qbu', name: 'QBU Builder', system_prompt: '', knowledge_scopes: [...allDeptKeys, 'general'], inject_operational_context: false },
+  ].filter((a) => !existingKeys.has(a.agent_key));
+
+  if (missingCrossFunctional.length > 0) {
+    const newRows = missingCrossFunctional.map((a) => ({
+      tenant_id: tenantId,
+      ...a,
+      workspace_id: null,
+    }));
+    await supabase.from('tenant_agents').insert(newRows);
+    console.log(`[regenerateAgentPrompts] Added missing agent(s): ${missingCrossFunctional.map((a) => a.agent_key).join(', ')}`);
+  }
 
   // Return refreshed agents
   const { data: refreshed } = await supabase

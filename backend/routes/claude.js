@@ -130,12 +130,37 @@ The following is a real-time summary of this tenant's operational data. Use it t
  */
 async function getKnowledgeContext(supabase, tenantId, agentKey, userMessage) {
   // Fetch agent config from DB
-  const { data: agentRow } = await supabase
+  let { data: agentRow } = await supabase
     .from('tenant_agents')
     .select('knowledge_scopes, inject_operational_context')
     .eq('tenant_id', tenantId)
     .eq('agent_key', agentKey)
-    .single();
+    .maybeSingle();
+
+  // Fallback: if no agent row, check tenant_tools for tool→agent mapping
+  // (e.g. tool_key='qbu' maps to agent_key='operations')
+  if (!agentRow) {
+    const { data: toolRow } = await supabase
+      .from('tenant_tools')
+      .select('agent_key')
+      .eq('tenant_id', tenantId)
+      .eq('tool_key', agentKey)
+      .maybeSingle();
+
+    if (toolRow?.agent_key && toolRow.agent_key !== agentKey) {
+      const { data: mappedAgent } = await supabase
+        .from('tenant_agents')
+        .select('knowledge_scopes, inject_operational_context')
+        .eq('tenant_id', tenantId)
+        .eq('agent_key', toolRow.agent_key)
+        .maybeSingle();
+
+      if (mappedAgent) {
+        agentRow = mappedAgent;
+        console.log(`[claude] Tool fallback: ${agentKey} → ${toolRow.agent_key} knowledge_scopes`);
+      }
+    }
+  }
 
   const departments = agentRow?.knowledge_scopes || [];
   if (!departments.length) return null;
