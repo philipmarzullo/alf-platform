@@ -58,12 +58,16 @@ router.put('/:tenantId', async (req, res) => {
   delete profileData.updated_at;
 
   try {
-    // Check if profile exists
+    // Check if profile exists + capture old departments for diff
     const { data: existing } = await req.supabase
       .from('tenant_company_profiles')
-      .select('id')
+      .select('id, departments')
       .eq('tenant_id', tenantId)
       .maybeSingle();
+
+    const oldDeptKeys = new Set(
+      (existing?.departments || []).map(d => d.key)
+    );
 
     let result;
 
@@ -89,7 +93,14 @@ router.put('/:tenantId', async (req, res) => {
       return res.status(500).json({ error: result.error.message });
     }
 
-    return res.json({ profile: result.data });
+    // Detect new departments added in this update
+    const newDepartments = (profileData.departments || [])
+      .filter(d => !oldDeptKeys.has(d.key));
+
+    return res.json({
+      profile: result.data,
+      newDepartments: newDepartments.length > 0 ? newDepartments : undefined,
+    });
   } catch (err) {
     console.error('[company-profile] PUT exception:', err.message);
     return res.status(500).json({ error: 'Failed to save company profile' });

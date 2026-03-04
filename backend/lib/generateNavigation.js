@@ -94,7 +94,8 @@ export async function generateNavSections(supabase, tenantId) {
       label: 'Admin',
       sort_order: 4,
       items: [
-        { key: 'knowledge', label: 'Knowledge Base', path: '/portal/admin/knowledge', icon: 'BookOpen', min_role: 'admin' },
+        { key: 'knowledge', label: 'Agent Knowledge', path: '/portal/admin/knowledge', icon: 'BookOpen', min_role: 'admin' },
+        { key: 'agents', label: 'Agent Factory', path: '/portal/admin/agents', icon: 'Bot', min_role: 'admin' },
         { key: 'users', label: 'User Management', path: '/portal/admin/users', icon: 'UserCog', min_role: 'admin' },
         { key: 'role-templates', label: 'Role Templates', path: '/portal/admin/role-templates', icon: 'ShieldCheck', min_role: 'admin' },
         { key: 'tool-builder', label: 'Tool Builder', path: '/portal/tools/custom/builder', icon: 'Wrench', min_role: 'admin' },
@@ -182,7 +183,7 @@ export async function generateModuleRegistry(supabase, tenantId) {
     },
     {
       module_key: 'knowledge',
-      label: 'Knowledge Base',
+      label: 'Agent Knowledge',
       description: 'Company SOPs, documents, and agent knowledge',
       icon: 'BookOpen',
       module_type: 'platform',

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from '../middleware/rateLimit.js';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
 import { extractMemories } from './memory.js';
+import { semanticSearch, hasEmbeddings } from '../lib/semanticSearch.js';
 
 const router = Router();
 
@@ -127,7 +128,7 @@ The following is a real-time summary of this tenant's operational data. Use it t
  * Fetch extracted documents for a tenant + agent and build a context block.
  * Uses knowledge_scopes from tenant_agents DB instead of hardcoded map.
  */
-async function getKnowledgeContext(supabase, tenantId, agentKey) {
+async function getKnowledgeContext(supabase, tenantId, agentKey, userMessage) {
   // Fetch agent config from DB
   const { data: agentRow } = await supabase
     .from('tenant_agents')
@@ -142,22 +143,43 @@ async function getKnowledgeContext(supabase, tenantId, agentKey) {
   // Stash agent row on function scope for caller to use
   getKnowledgeContext._lastAgent = agentRow;
 
-  const { data: docs } = await supabase
-    .from('tenant_documents')
-    .select('file_name, doc_type, department, extracted_text')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'extracted')
-    .in('department', departments)
-    .order('doc_type')
-    .limit(20);
-
   let context = '';
 
-  if (docs?.length) {
-    const blocks = docs.map(d =>
-      `--- ${d.doc_type.toUpperCase()}: ${d.file_name} (${d.department}) ---\n${d.extracted_text}`
-    );
-    context += `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+  // Dual-path: semantic search when embeddings exist, keyword fallback otherwise
+  let usedSemantic = false;
+  if (userMessage) {
+    try {
+      const embeddingsExist = await hasEmbeddings(supabase, tenantId);
+      if (embeddingsExist) {
+        const semanticCtx = await semanticSearch(supabase, tenantId, userMessage);
+        if (semanticCtx) {
+          context += semanticCtx;
+          usedSemantic = true;
+          console.log(`[claude] Used semantic search for ${agentKey} — ${semanticCtx.length} chars`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[claude] Semantic search failed, falling back to keywords:`, err.message);
+    }
+  }
+
+  // Keyword fallback: fetch full documents by department match
+  if (!usedSemantic) {
+    const { data: docs } = await supabase
+      .from('tenant_documents')
+      .select('file_name, doc_type, department, extracted_text')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'extracted')
+      .in('department', departments)
+      .order('doc_type')
+      .limit(20);
+
+    if (docs?.length) {
+      const blocks = docs.map(d =>
+        `--- ${d.doc_type.toUpperCase()}: ${d.file_name} (${d.department}) ---\n${d.extracted_text}`
+      );
+      context += `\n\n=== TENANT KNOWLEDGE BASE ===\nThe following documents have been uploaded for this tenant. Use them as reference when answering questions. Follow SOPs exactly as documented.\n\n${blocks.join('\n\n')}`;
+    }
   }
 
   // Inject RFP Q&A library for the rfp_builder agent
@@ -444,7 +466,13 @@ router.post('/', rateLimit, async (req, res) => {
     // Enrich system prompt with tenant knowledge docs
     let enrichedSystem = system || '';
     if (effectiveTenantId && agent_key) {
-      const knowledgeCtx = await getKnowledgeContext(req.supabase, effectiveTenantId, agent_key);
+      // Extract last user message for semantic search
+      const lastUserMessage = [...(messages || [])].reverse().find(m => m.role === 'user');
+      const userQuery = typeof lastUserMessage?.content === 'string'
+        ? lastUserMessage.content
+        : lastUserMessage?.content?.[0]?.text || '';
+
+      const knowledgeCtx = await getKnowledgeContext(req.supabase, effectiveTenantId, agent_key, userQuery);
       if (knowledgeCtx) {
         enrichedSystem = enrichedSystem + knowledgeCtx;
         console.log(`[claude] Injected knowledge for ${agent_key} — ${knowledgeCtx.length} chars`);

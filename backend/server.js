@@ -9,6 +9,7 @@ import sopAnalysisRouter from './routes/sopAnalysis.js';
 import dashboardsRouter from './routes/dashboards.js';
 import backupRouter, { handleScheduledExport } from './routes/backup.js';
 import { handleScheduledWorkflows } from './routes/scheduledRuns.js';
+import { handleMetricTriggers } from './routes/metricTriggers.js';
 import customToolsRouter from './routes/customTools.js';
 import syncRouter from './routes/sync.js';
 import oauthRouter from './routes/oauth.js';
@@ -29,6 +30,7 @@ import userTasksRouter from './routes/userTasks.js';
 import platformUsersRouter from './routes/platformUsers.js';
 import connectionsRouter from './routes/connections.js';
 import integrationsRouter from './routes/integrations.js';
+import embeddingsRouter from './routes/embeddings.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -70,6 +72,7 @@ app.use('/api/oauth', oauthRouter);
 // --- Scheduled cron routes (no auth — protected by CRON_SECRET) ---
 app.post('/api/backup/cron/daily-export', handleScheduledExport);
 app.post('/api/workflows/cron/execute', handleScheduledWorkflows);
+app.post('/api/workflows/cron/metric-triggers', handleMetricTriggers);
 
 // --- Public API routes (no auth) ---
 app.use('/api/demo-request', demoRequestRouter);
@@ -99,6 +102,7 @@ app.use('/api/user-tasks', auth, userTasksRouter);
 app.use('/api/platform-users', auth, platformUsersRouter);
 app.use('/api/connections', auth, connectionsRouter);
 app.use('/api/integrations', auth, integrationsRouter);
+app.use('/api/embeddings', auth, embeddingsRouter);
 
 // --- 404 ---
 app.use((req, res) => {

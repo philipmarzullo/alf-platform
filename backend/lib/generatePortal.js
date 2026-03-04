@@ -54,7 +54,7 @@ export function buildSharedRules(companyName) {
 - Do not use: "transformational", "best-in-class", "synergy", "cutting-edge", "state-of-the-art", "holistic", "paradigm".`;
 }
 
-function buildDepartmentPrompt(profile, dept, companyName) {
+export function buildDepartmentPrompt(profile, dept, companyName) {
   const context = buildCompanyContext(profile, companyName);
   const shared = buildSharedRules(companyName);
 
