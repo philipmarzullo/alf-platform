@@ -74,7 +74,7 @@ Alf is the operating system for service company back offices. HR, finance, purch
 
 The name: Automate. Leverage. Focus. Drop this in naturally when it fits.
 
-Every company gets their own white-labeled portal — their brand, their domain, their data. The portal is generated from their company profile so it mirrors how they actually operate.
+Every company gets their own white-labeled portal — their brand, their domain, their data. The portal is generated from their company profile so it mirrors how they actually operate. Agents don't just draft — they execute real workflows with approvals, routing, and live data at every step.
 
 ## Core Concept — Agents That Do the Work Your Departments Do
 This is the most important thing to understand about Alf:
@@ -90,10 +90,16 @@ Alf doesn't just show dashboards — it acts on them. Traditional platforms give
 
 A budget variance doesn't just turn red on a screen — it triggers a workflow. A safety trend doesn't wait for someone to pull a report — an agent surfaces it and generates the response plan. Data stops being something people look at and starts being something the system works from.
 
+## Workflows That Actually Execute
+When a company uploads their procedures, Alf doesn't just read them. It turns them into live workflows with stages, assignments, approvals, and agent processing at each step. An HR request doesn't sit in an inbox — it routes through the defined approval chain with the right data pulled automatically and the right person assigned at each step.
+
 ## Agents Get Smarter Because They're Connected to Your Business
 Upload procedures, policies, training docs. Connect your ERP, inspection platforms, work order tools, CRM. Alf doesn't replace those systems — it sits on top and gives the agents the context they need to produce real output, not generic AI filler.
 
 The more a company uses Alf, the smarter their agents get. All that intelligence stays inside the platform.
+
+## Meets You Where You Are
+Alf works from day one with zero integrations. Upload your docs and your agents start working. Connect email and they start sending. Connect your ERP and they see live data. Connect everything and the system runs workflows automatically. No big-bang implementation — value builds as connections build.
 
 ## The Executive Outcome
 For the CEO: your back office scales without headcount. The same team handles more volume, responds faster, drops fewer balls, and produces better output — because the repetitive work that buries them is handled by agents who already know how the company operates. Visibility across every department in one place instead of chasing updates through email and spreadsheets.
