@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { extractMemories } from './memory.js';
+import { advanceRun } from '../lib/workflowRuntime.js';
 
 const router = Router();
 
@@ -228,6 +229,13 @@ router.put('/:id', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // If this task is linked to a workflow stage, advance the run
+    if (status === 'completed' && task.workflow_run_id && task.workflow_step_run_id) {
+      const humanOutput = outcome_notes ? { notes: outcome_notes, edits_applied: !!edits_applied } : null;
+      advanceRun(req.supabase, task.workflow_run_id, task.workflow_step_run_id, humanOutput, req.user.id)
+        .catch(err => console.error('[user-tasks] Advance run error:', err.message));
+    }
 
     // On completion/dismissal, write to tenant_memory for feedback loop
     if (status === 'completed' || status === 'dismissed') {

@@ -31,6 +31,7 @@ import platformUsersRouter from './routes/platformUsers.js';
 import connectionsRouter from './routes/connections.js';
 import integrationsRouter from './routes/integrations.js';
 import embeddingsRouter from './routes/embeddings.js';
+import workflowRunsRouter from './routes/workflowRuns.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -103,6 +104,7 @@ app.use('/api/platform-users', auth, platformUsersRouter);
 app.use('/api/connections', auth, connectionsRouter);
 app.use('/api/integrations', auth, integrationsRouter);
 app.use('/api/embeddings', auth, embeddingsRouter);
+app.use('/api/workflow-runs', auth, workflowRunsRouter);
 
 // --- 404 ---
 app.use((req, res) => {
