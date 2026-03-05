@@ -271,6 +271,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     system_prompt: buildDepartmentPrompt(profile, dept, companyName),
     knowledge_scopes: [dept.key],
     inject_operational_context: false,
+    source: 'platform',
   }));
 
   // 5. Cross-functional agents (no workspace)
@@ -282,6 +283,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     system_prompt: buildAdminPrompt(profile, companyName),
     knowledge_scopes: ['admin', 'general'],
     inject_operational_context: false,
+    source: 'platform',
   });
 
   agentRows.push({
@@ -292,6 +294,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     system_prompt: buildAnalyticsPrompt(profile, companyName),
     knowledge_scopes: ['ops', 'general'],
     inject_operational_context: true,
+    source: 'platform',
   });
 
   agentRows.push({
@@ -302,6 +305,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     system_prompt: buildRFPBuilderPrompt(profile, companyName),
     knowledge_scopes: [...departments.map((d) => d.key), 'general'],
     inject_operational_context: true,
+    source: 'platform',
   });
 
   // Tool-specific agents — broad knowledge access for cross-functional tools
@@ -313,6 +317,7 @@ export async function generateWorkspacesAndAgents(supabase, tenantId) {
     system_prompt: '', // Frontend provides the system prompt
     knowledge_scopes: [...departments.map((d) => d.key), 'general'],
     inject_operational_context: false,
+    source: 'platform',
   });
 
   let agents = [];
@@ -363,8 +368,8 @@ export async function regenerateAgentPrompts(supabase, tenantId) {
   const deptMap = {};
   (profile.departments || []).forEach((d) => { deptMap[d.key] = d; });
 
-  // Update each agent's system_prompt
-  const updates = agents.map((agent) => {
+  // Update each agent's system_prompt (platform agents only)
+  const updates = agents.filter((a) => a.source !== 'tenant').map((agent) => {
     let newPrompt;
 
     if (agent.agent_key === 'admin') {
@@ -394,7 +399,7 @@ export async function regenerateAgentPrompts(supabase, tenantId) {
   const allDeptKeys = departments.map((d) => d.key);
 
   const missingCrossFunctional = [
-    { agent_key: 'qbu', name: 'QBU Builder', system_prompt: '', knowledge_scopes: [...allDeptKeys, 'general'], inject_operational_context: false },
+    { agent_key: 'qbu', name: 'QBU Builder', system_prompt: '', knowledge_scopes: [...allDeptKeys, 'general'], inject_operational_context: false, source: 'platform' },
   ].filter((a) => !existingKeys.has(a.agent_key));
 
   if (missingCrossFunctional.length > 0) {

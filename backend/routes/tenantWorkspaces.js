@@ -76,6 +76,7 @@ router.get('/:tenantId', requireAdmin, async (req, res) => {
         .from('tenant_agents')
         .select('*')
         .eq('tenant_id', tenantId)
+        .is('deleted_at', null)
         .order('created_at'),
     ]);
 
@@ -146,6 +147,7 @@ router.post('/:tenantId/agents', requireAdmin, async (req, res) => {
       system_prompt: finalPrompt || null,
       knowledge_scopes: knowledge_scopes || [department || agent_key],
       inject_operational_context: false,
+      source: 'tenant',
     };
 
     const { data, error } = await req.supabase
@@ -280,13 +282,26 @@ router.put('/:tenantId/agents/:agentId', requireAdmin, async (req, res) => {
   const { tenantId, agentId } = req.params;
   const { name, system_prompt, model, knowledge_scopes } = req.body;
 
-  const updates = {};
-  if (name !== undefined) updates.name = name;
-  if (system_prompt !== undefined) updates.system_prompt = system_prompt;
-  if (model !== undefined) updates.model = model;
-  if (knowledge_scopes !== undefined) updates.knowledge_scopes = knowledge_scopes;
-
   try {
+    // Check if this is a platform agent — block all edits
+    const { data: existing, error: fetchErr } = await req.supabase
+      .from('tenant_agents')
+      .select('source')
+      .eq('id', agentId)
+      .eq('tenant_id', tenantId)
+      .single();
+
+    if (fetchErr) throw new Error(fetchErr.message);
+    if (existing.source === 'platform') {
+      return res.status(403).json({ error: 'Platform agents cannot be edited. Customize behavior through Knowledge Base and Agent Instructions.' });
+    }
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (system_prompt !== undefined) updates.system_prompt = system_prompt;
+    if (model !== undefined) updates.model = model;
+    if (knowledge_scopes !== undefined) updates.knowledge_scopes = knowledge_scopes;
+
     const { data, error } = await req.supabase
       .from('tenant_agents')
       .update(updates)
@@ -299,6 +314,41 @@ router.put('/:tenantId/agents/:agentId', requireAdmin, async (req, res) => {
     return res.json({ agent: data });
   } catch (err) {
     console.error('[tenant-workspaces] update agent error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/tenant-workspaces/:tenantId/agents/:agentId
+ * Soft-delete a tenant-created agent. Platform agents cannot be deleted.
+ * Admin access.
+ */
+router.delete('/:tenantId/agents/:agentId', requireAdmin, async (req, res) => {
+  const { tenantId, agentId } = req.params;
+
+  try {
+    const { data: existing, error: fetchErr } = await req.supabase
+      .from('tenant_agents')
+      .select('source')
+      .eq('id', agentId)
+      .eq('tenant_id', tenantId)
+      .single();
+
+    if (fetchErr) throw new Error(fetchErr.message);
+    if (existing.source === 'platform') {
+      return res.status(403).json({ error: 'Platform agents cannot be deleted.' });
+    }
+
+    const { error } = await req.supabase
+      .from('tenant_agents')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', agentId)
+      .eq('tenant_id', tenantId);
+
+    if (error) throw new Error(error.message);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[tenant-workspaces] delete agent error:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
