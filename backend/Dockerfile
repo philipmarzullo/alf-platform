@@ -14,4 +14,4 @@ COPY sync/ ./sync/
 
 EXPOSE 3001
 
-CMD ["node", "server.js"]
+CMD ["node", "--max-old-space-size=448", "server.js"]

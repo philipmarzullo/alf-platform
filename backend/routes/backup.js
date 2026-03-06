@@ -112,7 +112,7 @@ async function buildTenantPayload(sb, tenantId) {
 
 /** Upload JSON to Supabase Storage. Returns file size in bytes. */
 async function saveToStorage(sb, jsonPayload, storagePath) {
-  const jsonStr = JSON.stringify(jsonPayload, null, 2);
+  const jsonStr = JSON.stringify(jsonPayload);
   const buffer = Buffer.from(jsonStr, 'utf-8');
 
   const { error } = await sb.storage
