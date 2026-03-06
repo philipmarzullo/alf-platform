@@ -71,7 +71,7 @@ export default function PlatformAgentDetailPage() {
           .eq('agent_key', agentKey),
         supabase
           .from('agent_instructions')
-          .select('*, profiles:created_by(full_name), reviewer:reviewed_by(full_name), alf_tenants:tenant_id(name)')
+          .select('*, profiles:created_by(name), reviewer:reviewed_by(name), alf_tenants:tenant_id(name)')
           .eq('agent_key', agentKey)
           .order('created_at', { ascending: false }),
         supabase
@@ -558,7 +558,7 @@ export default function PlatformAgentDetailPage() {
                         </div>
                         <p className="text-sm text-dark-text whitespace-pre-wrap">{instr.instruction_text}</p>
                         <div className="text-xs text-secondary-text mt-1">
-                          {instr.profiles?.full_name || 'Unknown'} · {new Date(instr.created_at).toLocaleDateString()}
+                          {instr.profiles?.name || 'Unknown'} · {new Date(instr.created_at).toLocaleDateString()}
                           {instr.review_note && (
                             <span className="ml-2 text-gray-400">Note: {instr.review_note}</span>
                           )}

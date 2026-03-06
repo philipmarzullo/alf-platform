@@ -1411,7 +1411,7 @@ router.get('/:tenantId/shares', async (req, res) => {
       // Admins see all shares for the tenant
       query = req.supabase
         .from('dashboard_shares')
-        .select('*, shared_with_profile:profiles!dashboard_shares_shared_with_fkey(id, full_name, email)')
+        .select('*, shared_with_profile:profiles!dashboard_shares_shared_with_fkey(id, name, email)')
         .eq('tenant_id', effectiveTenantId);
     } else {
       // Regular users see only shares directed at them
