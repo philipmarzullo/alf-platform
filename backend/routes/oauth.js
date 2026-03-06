@@ -114,6 +114,15 @@ router.get('/microsoft/authorize', async (req, res) => {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
   const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
   if (!clientId || !redirectUri) {
+    // Redirect back to tenant portal instead of showing raw JSON
+    try {
+      const portalUrl = await getPortalUrl(tenantId);
+      if (portalUrl) {
+        return res.redirect(`${portalUrl}/admin/connections?oauth_error=not_configured`);
+      }
+    } catch (e) {
+      console.warn('[oauth] Could not resolve portal URL for not-configured redirect:', e.message);
+    }
     return res.status(500).json({ error: 'Microsoft OAuth not configured on server' });
   }
 
