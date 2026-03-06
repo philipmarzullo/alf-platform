@@ -33,6 +33,7 @@ import integrationsRouter from './routes/integrations.js';
 import embeddingsRouter from './routes/embeddings.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import qbrTemplatesRouter from './routes/qbrTemplates.js';
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -58,14 +59,28 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // --- Health check (no auth) ---
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    version: '1.0.0',
-    anthropic_configured: !!process.env.ANTHROPIC_API_KEY,
-    credential_encryption: !!process.env.CREDENTIAL_ENCRYPTION_KEY,
-    supabase_configured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY),
-  });
+app.get('/health', async (req, res) => {
+  const checks = {
+    server: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  };
+
+  // Deep check: actually query Supabase
+  try {
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+    const start = Date.now();
+    const { error } = await sb.from('alf_platform_config').select('key').limit(1);
+    checks.supabase = error ? 'error' : 'ok';
+    checks.supabase_latency_ms = Date.now() - start;
+    if (error) checks.supabase_error = error.message;
+  } catch (err) {
+    checks.supabase = 'error';
+    checks.supabase_error = err.message;
+  }
+
+  const healthy = checks.supabase === 'ok';
+  res.status(healthy ? 200 : 503).json({ status: healthy ? 'healthy' : 'degraded', ...checks });
 });
 
 // --- OAuth routes (no global auth — handled per-endpoint inside router) ---
