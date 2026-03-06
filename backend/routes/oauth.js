@@ -118,7 +118,7 @@ router.get('/microsoft/authorize', async (req, res) => {
     try {
       const portalUrl = await getPortalUrl(tenantId);
       if (portalUrl) {
-        return res.redirect(`${portalUrl}/admin/connections?oauth_error=not_configured`);
+        return res.redirect(`${portalUrl}/portal/admin/connections?oauth_error=not_configured`);
       }
     } catch (e) {
       console.warn('[oauth] Could not resolve portal URL for not-configured redirect:', e.message);
@@ -187,7 +187,7 @@ router.get('/microsoft/callback', async (req, res) => {
     const payload = state ? verifySignedState(state) : null;
     const portalUrl = payload ? await getPortalUrl(payload.tenantId) : null;
     if (portalUrl) {
-      return res.redirect(`${portalUrl}/admin/connections?oauth_error=${encodeURIComponent(msError)}`);
+      return res.redirect(`${portalUrl}/portal/admin/connections?oauth_error=${encodeURIComponent(msError)}`);
     }
     return res.status(400).json({ error: msError, description: error_description });
   }
@@ -231,7 +231,7 @@ router.get('/microsoft/callback', async (req, res) => {
     if (!tokenRes.ok || !tokenData.access_token) {
       console.error('[oauth] Token exchange failed:', tokenData.error_description || tokenData.error);
       if (portalUrl) {
-        return res.redirect(`${portalUrl}/admin/connections?oauth_error=token_exchange_failed`);
+        return res.redirect(`${portalUrl}/portal/admin/connections?oauth_error=token_exchange_failed`);
       }
       return res.status(400).json({ error: 'Token exchange failed' });
     }
@@ -286,7 +286,7 @@ router.get('/microsoft/callback', async (req, res) => {
     if (dbError) {
       console.error('[oauth] DB upsert failed:', dbError.message);
       if (portalUrl) {
-        return res.redirect(`${portalUrl}/admin/connections?oauth_error=server_error`);
+        return res.redirect(`${portalUrl}/portal/admin/connections?oauth_error=server_error`);
       }
       return res.status(500).json({ error: 'Failed to save connection' });
     }
@@ -318,13 +318,13 @@ router.get('/microsoft/callback', async (req, res) => {
     console.log(`[oauth] Microsoft connected for tenant ${tenantId} (${msUser.email})`);
 
     if (portalUrl) {
-      return res.redirect(`${portalUrl}/admin/connections?oauth_success=microsoft`);
+      return res.redirect(`${portalUrl}/portal/admin/connections?oauth_success=microsoft`);
     }
     res.json({ success: true, email: msUser.email });
   } catch (err) {
     console.error('[oauth] Callback error:', err.message);
     if (portalUrl) {
-      return res.redirect(`${portalUrl}/admin/connections?oauth_error=server_error`);
+      return res.redirect(`${portalUrl}/portal/admin/connections?oauth_error=server_error`);
     }
     res.status(500).json({ error: 'OAuth callback failed' });
   }
