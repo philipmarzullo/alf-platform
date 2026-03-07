@@ -112,8 +112,8 @@ async function buildTenantPayload(sb, tenantId) {
 
 /** Upload JSON to Supabase Storage. Returns file size in bytes. */
 async function saveToStorage(sb, jsonPayload, storagePath) {
-  const jsonStr = JSON.stringify(jsonPayload);
-  const buffer = Buffer.from(jsonStr, 'utf-8');
+  // Stringify directly to buffer — avoids holding both string + buffer in memory
+  const buffer = Buffer.from(JSON.stringify(jsonPayload), 'utf-8');
 
   const { error } = await sb.storage
     .from(STORAGE_BUCKET)
@@ -260,20 +260,23 @@ async function runPlatformExport(sb, { userId = null, userName = null } = {}) {
 
   if (tenantErr) throw tenantErr;
 
-  // 2. Build per-tenant payloads
-  const tenantExports = {};
+  const now = new Date();
+  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
   let totalRows = 0;
   const tenantSummaries = {};
 
+  // 2. Export each tenant individually to storage (avoids holding all in memory)
   for (const tenant of (tenants || [])) {
+    const slug = tenant.slug || tenant.id;
     try {
       const result = await buildTenantPayload(sb, tenant.id);
-      tenantExports[tenant.slug || tenant.id] = result.payload;
-      tenantSummaries[tenant.slug || tenant.id] = result.summary;
+      const tenantPath = `platform/daily_${dateStr}/${slug}.json`;
+      await saveToStorage(sb, result.payload, tenantPath);
+      tenantSummaries[slug] = result.summary;
       totalRows += result.totalRows;
     } catch (err) {
       console.warn(`[backup] Skipping tenant ${tenant.name}: ${err.message}`);
-      tenantExports[tenant.slug || tenant.id] = { error: err.message };
+      tenantSummaries[slug] = { error: err.message };
     }
   }
 
@@ -294,13 +297,12 @@ async function runPlatformExport(sb, { userId = null, userName = null } = {}) {
     }
   }
 
-  // 4. Assemble payload
-  const now = new Date();
-  const payload = {
+  // 4. Save platform tables + manifest (lightweight — tenant data already uploaded)
+  const manifest = {
     exportedAt: now.toISOString(),
     backupType: 'platform',
     tenantCount: (tenants || []).length,
-    tenants: tenantExports,
+    tenantSlugs: (tenants || []).map(t => t.slug || t.id),
     platform: platformData,
     _summary: {
       tenants: tenantSummaries,
@@ -309,10 +311,8 @@ async function runPlatformExport(sb, { userId = null, userName = null } = {}) {
     },
   };
 
-  // 5. Save to storage
-  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const storagePath = `platform/full_backup_${dateStr}.json`;
-  const fileSize = await saveToStorage(sb, payload, storagePath);
+  const fileSize = await saveToStorage(sb, manifest, storagePath);
 
   // 6. Record in alf_backups
   const tableSummary = { tenants: tenantSummaries, platform: platformSummary };
@@ -431,7 +431,7 @@ router.get('/:tenantId/export', async (req, res) => {
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(JSON.stringify(payload, null, 2));
+    res.send(JSON.stringify(payload));
   } catch (err) {
     console.error('[backup] Export failed:', err.message);
     res.status(500).json({ error: 'Export failed', detail: err.message });
