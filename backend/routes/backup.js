@@ -24,7 +24,7 @@ const EXPORT_TABLES = [
   { key: 'sites',                 table: 'tenant_sites' },
   { key: 'clientContacts',        table: 'client_contacts' },
   { key: 'documents',             table: 'tenant_documents' },
-  { key: 'toolSubmissions',       table: 'tool_submissions' },
+  { key: 'toolSubmissions',       table: 'tool_submissions',    select: 'id, tenant_id, tool_key, title, status, created_by, created_at' },
   { key: 'agentOverrides',        table: 'tenant_agent_overrides' },
   { key: 'sopAnalyses',           table: 'sop_analyses' },
   { key: 'automationRoadmaps',    table: 'dept_automation_roadmaps' },
