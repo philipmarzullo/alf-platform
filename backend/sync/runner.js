@@ -4,6 +4,7 @@ import FileUploadConnector from './connectors/FileUploadConnector.js';
 import SnowflakeConnector from './connectors/SnowflakeConnector.js';
 import SqlConnector from './connectors/SqlConnector.js';
 import { getTenantApiKey } from '../routes/credentials.js';
+import { getPlatformApiKey } from '../routes/platformCredentials.js';
 
 const CONNECTOR_MAP = {
   file_upload: FileUploadConnector,
@@ -62,26 +63,56 @@ export async function runSync(supabase, syncConfig, options = {}) {
     const ConnectorClass = CONNECTOR_MAP[connectorType];
     if (!ConnectorClass) throw new Error(`Unknown connector type: ${connectorType}`);
 
-    // 3. Resolve credentials (file_upload skips)
+    // 3. Resolve credentials
     let credentials = null;
     if (connectorType !== 'file_upload') {
-      const credJson = await getTenantApiKey(supabase, tenantId, connectorType);
-      if (credJson) {
-        try {
-          credentials = typeof credJson === 'string' ? JSON.parse(credJson) : credJson;
-        } catch {
-          credentials = credJson; // might be a plain key string
+      if (ConnectorClass.usesPlatformCredentials) {
+        // Platform-owned connector — use alf_platform_credentials
+        const credJson = await getPlatformApiKey(supabase, connectorType);
+        if (credJson) {
+          try {
+            credentials = typeof credJson === 'string' ? JSON.parse(credJson) : credJson;
+          } catch {
+            credentials = credJson;
+          }
+        }
+      } else {
+        // Tenant-owned connector — use tenant_api_credentials
+        const credJson = await getTenantApiKey(supabase, tenantId, connectorType);
+        if (credJson) {
+          try {
+            credentials = typeof credJson === 'string' ? JSON.parse(credJson) : credJson;
+          } catch {
+            credentials = credJson;
+          }
         }
       }
     }
 
-    // 4. Instantiate connector
-    connector = new ConnectorClass(tenantId, config, credentials);
+    // 4. Auto-derive tenant_database for platform connectors if not set
+    const effectiveConfig = { ...config };
+    if (ConnectorClass.usesPlatformCredentials && !effectiveConfig.tenant_database) {
+      const { data: tenant } = await supabase
+        .from('alf_tenants')
+        .select('slug')
+        .eq('id', tenantId)
+        .single();
 
-    // 5. Connect
+      if (tenant?.slug) {
+        effectiveConfig.tenant_database = `ALF_${tenant.slug.toUpperCase()}`;
+        console.log(`[sync:runner] Auto-derived tenant_database: ${effectiveConfig.tenant_database}`);
+      } else {
+        throw new Error('Cannot auto-derive tenant_database — tenant slug not found');
+      }
+    }
+
+    // 5. Instantiate connector
+    connector = new ConnectorClass(tenantId, effectiveConfig, credentials);
+
+    // 6. Connect
     await connector.connect();
 
-    // 6. Determine tables to sync
+    // 7. Determine tables to sync
     const allTables = getSyncOrder();
     const tablesToSync = (tables_to_sync && tables_to_sync.length > 0)
       ? allTables.filter(t => tables_to_sync.includes(t))
@@ -92,7 +123,7 @@ export async function runSync(supabase, syncConfig, options = {}) {
       ? tablesToSync.filter(t => t === config.targetTable)
       : tablesToSync;
 
-    // 7. Fetch and upsert each table in sync order
+    // 8. Fetch and upsert each table in sync order
     for (const table of effectiveTables) {
       try {
         const rows = await fetchWithRetry(connector, table);
@@ -115,13 +146,13 @@ export async function runSync(supabase, syncConfig, options = {}) {
   } catch (err) {
     errors.push({ error: err.message });
   } finally {
-    // 8. Always disconnect
+    // 9. Always disconnect
     if (connector) {
       try { await connector.disconnect(); } catch { /* ignore */ }
     }
   }
 
-  // 9. Determine final status
+  // 10. Determine final status
   const completedAt = new Date();
   const durationMs = completedAt - startedAt;
   const tableResults = Object.values(rowCounts);
@@ -133,7 +164,7 @@ export async function runSync(supabase, syncConfig, options = {}) {
   else if (hasSuccess) status = 'partial';
   else status = 'error';
 
-  // 10. Update sync_logs
+  // 11. Update sync_logs
   await supabase
     .from('sync_logs')
     .update({
@@ -145,7 +176,7 @@ export async function runSync(supabase, syncConfig, options = {}) {
     })
     .eq('id', logId);
 
-  // 11. Update sync_configs.last_sync_at if config exists
+  // 12. Update sync_configs.last_sync_at if config exists
   if (syncConfig.id) {
     await supabase
       .from('sync_configs')

@@ -1,26 +1,22 @@
+import snowflake from 'snowflake-sdk';
 import BaseConnector from './BaseConnector.js';
 
 /**
- * Snowflake connector skeleton.
- * Maps sf_* tables to Wavelytics Data Factory queries.
- * Will become functional when A&A Snowflake credentials arrive (~March 2026).
+ * Snowflake connector — platform-owned, per-tenant database.
  *
- * Credentials shape (from tenant_api_credentials, service_type='snowflake'):
- * {
- *   account: string,
- *   username: string,
- *   password: string,
- *   warehouse: string,
- *   database: string,
- *   schema: string,
- *   role: string
- * }
+ * Platform credentials (from alf_platform_credentials, service_type='snowflake'):
+ * { account, username, password, warehouse, role }
  *
- * Config shape (from sync_configs.config):
+ * Config (from sync_configs.config):
  * {
- *   company_filter: string   // REQUIRED — filters dim_job.company to scope data to this tenant
+ *   company_filter: string,        // REQUIRED — filters dim_job.company
+ *   tenant_database: string,       // OPTIONAL — auto-derived from tenant slug if omitted
+ *   schema: string                 // OPTIONAL — defaults to PUBLIC
  * }
  */
+
+// Disable ocsp checks to avoid network issues in non-browser environments
+snowflake.configure({ ocspFailOpen: true });
 
 /**
  * Query templates with :company_filter placeholder.
@@ -39,7 +35,7 @@ const TABLE_QUERY_MAP = {
       is_active
     FROM dim_job
     WHERE is_active = TRUE
-      AND company = :company_filter
+      AND company = :1
   `,
 
   sf_dim_employee: `
@@ -53,7 +49,7 @@ const TABLE_QUERY_MAP = {
       e.hourly_rate
     FROM dim_employee e
     LEFT JOIN dim_job j ON e.job_id = j.job_id
-    WHERE j.company = :company_filter
+    WHERE j.company = :1
   `,
 
   sf_fact_labor_budget_actual: `
@@ -69,7 +65,7 @@ const TABLE_QUERY_MAP = {
       f.ot_dollars
     FROM fact_labor_budget_to_actual f
     JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :company_filter
+    WHERE j.company = :1
   `,
 
   sf_fact_job_daily: `
@@ -85,7 +81,7 @@ const TABLE_QUERY_MAP = {
       f.headcount
     FROM fact_job_daily f
     JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :company_filter
+    WHERE j.company = :1
   `,
 
   sf_fact_work_tickets: `
@@ -99,7 +95,7 @@ const TABLE_QUERY_MAP = {
       f.completed_at
     FROM fact_work_schedule_ticket f
     JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :company_filter
+    WHERE j.company = :1
   `,
 
   sf_fact_timekeeping: `
@@ -116,11 +112,14 @@ const TABLE_QUERY_MAP = {
     FROM fact_timekeeping f
     JOIN dim_employee e ON f.employee_id = e.employee_id
     JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :company_filter
+    WHERE j.company = :1
   `,
 };
 
 export default class SnowflakeConnector extends BaseConnector {
+  /** Runner checks this to resolve platform creds instead of tenant creds */
+  static usesPlatformCredentials = true;
+
   constructor(tenantId, config, credentials) {
     super(tenantId, config, credentials);
     this.connection = null;
@@ -128,7 +127,7 @@ export default class SnowflakeConnector extends BaseConnector {
 
   async connect() {
     if (!this.credentials) {
-      throw new Error('Snowflake credentials not configured for this tenant');
+      throw new Error('Snowflake platform credentials not configured');
     }
 
     // company_filter is required — prevents pulling data for other tenants
@@ -139,23 +138,35 @@ export default class SnowflakeConnector extends BaseConnector {
       );
     }
 
+    if (!this.config.tenant_database) {
+      throw new Error('tenant_database must be set in config or auto-derived from tenant slug');
+    }
+
     // Validate credential shape
-    const required = ['account', 'username', 'password', 'warehouse', 'database'];
+    const required = ['account', 'username', 'password', 'warehouse'];
     for (const field of required) {
       if (!this.credentials[field]) {
         throw new Error(`Snowflake credential missing required field: ${field}`);
       }
     }
 
-    // Skeleton: real connection will use snowflake-sdk
-    // const snowflake = await import('snowflake-sdk');
-    // this.connection = snowflake.createConnection({ ... });
-    // await new Promise((resolve, reject) => this.connection.connect((err, conn) => err ? reject(err) : resolve(conn)));
+    this.connection = snowflake.createConnection({
+      account: this.credentials.account,
+      username: this.credentials.username,
+      password: this.credentials.password,
+      warehouse: this.credentials.warehouse,
+      database: this.config.tenant_database,
+      schema: this.config.schema || 'PUBLIC',
+      role: this.credentials.role || 'SYSADMIN',
+      application: 'Alf_Platform',
+    });
 
-    throw new Error(
-      'Snowflake connector not yet active — install snowflake-sdk and configure credentials to enable. ' +
-      'Expected availability: when A&A Snowflake environment is provisioned.'
-    );
+    await new Promise((resolve, reject) => {
+      this.connection.connect((err, conn) => {
+        if (err) reject(new Error(`Snowflake connect failed: ${err.message}`));
+        else resolve(conn);
+      });
+    });
   }
 
   async fetchTable(targetTable) {
@@ -166,29 +177,40 @@ export default class SnowflakeConnector extends BaseConnector {
       throw new Error(`No Snowflake query mapped for table: ${targetTable}`);
     }
 
-    // Replace :company_filter with bind variable for parameterized execution.
-    // snowflake-sdk uses ? for positional binds.
-    const query = queryTemplate.replace(':company_filter', '?');
-    const binds = [this.config.company_filter];
+    const rows = await new Promise((resolve, reject) => {
+      this.connection.execute({
+        sqlText: queryTemplate,
+        binds: [this.config.company_filter],
+        complete: (err, stmt, rows) => {
+          if (err) reject(new Error(`Snowflake query failed (${targetTable}): ${err.message}`));
+          else resolve(rows);
+        },
+      });
+    });
 
-    // Skeleton: execute parameterized query and return rows
-    // const rows = await new Promise((resolve, reject) => {
-    //   this.connection.execute({
-    //     sqlText: query,
-    //     binds,
-    //     complete: (err, stmt, rows) => err ? reject(err) : resolve(rows)
-    //   });
-    // });
-    // return rows.map(row => this._normalizeRow(row));
+    return rows.map(row => this._normalizeRow(row));
+  }
 
-    void query;
-    void binds;
-    return [];
+  /**
+   * Snowflake returns UPPER_CASE column names by default.
+   * Normalize to lowercase to match sf_* table schemas.
+   */
+  _normalizeRow(row) {
+    const normalized = {};
+    for (const [key, value] of Object.entries(row)) {
+      normalized[key.toLowerCase()] = value;
+    }
+    return normalized;
   }
 
   async disconnect() {
     if (this.connection) {
-      // await new Promise(resolve => this.connection.destroy(resolve));
+      await new Promise((resolve) => {
+        this.connection.destroy((err) => {
+          if (err) console.warn('[snowflake] Disconnect warning:', err.message);
+          resolve();
+        });
+      });
       this.connection = null;
     }
   }
@@ -196,7 +218,17 @@ export default class SnowflakeConnector extends BaseConnector {
   async testConnection() {
     try {
       await this.connect();
-      return { success: true, message: 'Snowflake connection successful' };
+      // Verify we can query the database
+      const dbName = await new Promise((resolve, reject) => {
+        this.connection.execute({
+          sqlText: 'SELECT CURRENT_DATABASE() AS DB',
+          complete: (err, stmt, rows) => {
+            if (err) reject(err);
+            else resolve(rows[0]?.DB || 'unknown');
+          },
+        });
+      });
+      return { success: true, message: `Connected to ${dbName}` };
     } catch (err) {
       return { success: false, message: err.message };
     } finally {

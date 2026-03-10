@@ -103,6 +103,9 @@ router.get('/:tenantId/health', requireTenantAccess, async (req, res) => {
   const tenantId = req.params.tenantId;
   const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 hours
 
+  // Connector types that use platform credentials instead of tenant credentials
+  const PLATFORM_CREDENTIAL_TYPES = ['snowflake'];
+
   try {
     // 1. Check for any sync config
     const { data: configs, error: cfgErr } = await req.supabase
@@ -120,15 +123,24 @@ router.get('/:tenantId/health', requireTenantAccess, async (req, res) => {
 
     const cfg = configs;
 
-    // 2. Check credential status for this connector type
-    const { data: cred } = await req.supabase
-      .from('tenant_api_credentials')
-      .select('is_active')
-      .eq('tenant_id', tenantId)
-      .eq('service_type', cfg.connector_type)
-      .maybeSingle();
-
-    const credentialActive = !!cred?.is_active;
+    // 2. Check credential status — platform creds for Snowflake, tenant creds for others
+    let credentialActive = false;
+    if (PLATFORM_CREDENTIAL_TYPES.includes(cfg.connector_type)) {
+      const { data: platCred } = await req.supabase
+        .from('alf_platform_credentials')
+        .select('is_active')
+        .eq('service_type', cfg.connector_type)
+        .maybeSingle();
+      credentialActive = !!platCred?.is_active;
+    } else {
+      const { data: cred } = await req.supabase
+        .from('tenant_api_credentials')
+        .select('is_active')
+        .eq('tenant_id', tenantId)
+        .eq('service_type', cfg.connector_type)
+        .maybeSingle();
+      credentialActive = !!cred?.is_active;
+    }
 
     // 3. If config is deactivated or credential is missing/inactive → "inactive"
     if (!cfg.is_active || !credentialActive) {
@@ -298,17 +310,39 @@ router.post('/:tenantId/test-connection', requirePlatformAdmin, async (req, res)
       return res.status(400).json({ error: `Unknown connector type: ${connector_type}` });
     }
 
-    // For Snowflake, resolve credentials
+    // Resolve credentials — platform creds for Snowflake, tenant creds for others
     let credentials = null;
     if (connector_type !== 'file_upload') {
-      const { getTenantApiKey } = await import('./credentials.js');
-      const credJson = await getTenantApiKey(req.supabase, req.params.tenantId, connector_type);
-      if (credJson) {
-        try { credentials = JSON.parse(credJson); } catch { credentials = credJson; }
+      if (ConnectorClass.usesPlatformCredentials) {
+        const { getPlatformApiKey } = await import('./platformCredentials.js');
+        const credJson = await getPlatformApiKey(req.supabase, connector_type);
+        if (credJson) {
+          try { credentials = JSON.parse(credJson); } catch { credentials = credJson; }
+        }
+      } else {
+        const { getTenantApiKey } = await import('./credentials.js');
+        const credJson = await getTenantApiKey(req.supabase, req.params.tenantId, connector_type);
+        if (credJson) {
+          try { credentials = JSON.parse(credJson); } catch { credentials = credJson; }
+        }
       }
     }
 
-    const connector = new ConnectorClass(req.params.tenantId, config || {}, credentials);
+    // Auto-derive tenant_database for platform connectors
+    const effectiveConfig = { ...(config || {}) };
+    if (ConnectorClass.usesPlatformCredentials && !effectiveConfig.tenant_database) {
+      const { data: tenant } = await req.supabase
+        .from('alf_tenants')
+        .select('slug')
+        .eq('id', req.params.tenantId)
+        .single();
+
+      if (tenant?.slug) {
+        effectiveConfig.tenant_database = `ALF_${tenant.slug.toUpperCase()}`;
+      }
+    }
+
+    const connector = new ConnectorClass(req.params.tenantId, effectiveConfig, credentials);
     const result = await connector.testConnection();
     res.json(result);
   } catch (err) {
