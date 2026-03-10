@@ -157,7 +157,7 @@ export default class SnowflakeConnector extends BaseConnector {
       warehouse: this.credentials.warehouse,
       database: this.config.tenant_database,
       schema: this.config.schema || 'PUBLIC',
-      role: this.credentials.role || 'SYSADMIN',
+      role: this.credentials.role || 'ALF_SERVICE_ROLE',
       application: 'Alf_Platform',
     });
 
