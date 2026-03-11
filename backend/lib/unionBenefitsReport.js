@@ -139,8 +139,12 @@ export function classifyAndAggregate(rows, colMap, unionConfig) {
     }
     const emp = empMap.get(key);
 
-    // Update job number if we have one and the existing is empty
-    if (jobNumber && !emp.jobNumber) emp.jobNumber = jobNumber;
+    // Track job with most regular hours (best heuristic until WinTeam
+    // primary job data is available)
+    if (jobNumber) {
+      if (!emp._jobHours) emp._jobHours = {};
+      if (!emp._jobHours[jobNumber]) emp._jobHours[jobNumber] = 0;
+    }
 
     if (vacTypes.has(hourTypeLower)) {
       emp.vacHours += hours;
@@ -150,7 +154,27 @@ export function classifyAndAggregate(rows, colMap, unionConfig) {
         // It's a regular hour type — no warning needed unless it looks unusual
       }
       emp.regHours += hours;
+      // Accumulate regular hours per job for primary job detection
+      if (jobNumber && emp._jobHours) {
+        emp._jobHours[jobNumber] += hours;
+      }
     }
+  }
+
+  // Resolve primary job number — job with most regular hours
+  for (const emp of empMap.values()) {
+    if (emp._jobHours && Object.keys(emp._jobHours).length > 0) {
+      let bestJob = emp.jobNumber;
+      let bestHours = -Infinity;
+      for (const [job, hrs] of Object.entries(emp._jobHours)) {
+        if (hrs > bestHours) {
+          bestHours = hrs;
+          bestJob = job;
+        }
+      }
+      emp.jobNumber = bestJob;
+    }
+    delete emp._jobHours;
   }
 
   // Convert to sorted array
@@ -209,17 +233,19 @@ export function buildJobSummary(employees) {
  */
 export async function generateExcelReport(employees, jobSummary, unionConfig, reportMonth) {
   const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet('Union Benefits', {
-    views: [{ state: 'frozen', ySplit: 7 }],
-  });
-
-  const hwRate = parseFloat(unionConfig.hw_rate);
-  const pensionRate = parseFloat(unionConfig.pension_rate);
 
   // Format report month
   const [year, month] = reportMonth.split('-');
   const monthDate = new Date(parseInt(year), parseInt(month) - 1, 1);
   const monthLabel = monthDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  const sheetName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const ws = workbook.addWorksheet(sheetName, {
+    views: [{ state: 'frozen', ySplit: 7 }],
+  });
+
+  const hwRate = parseFloat(unionConfig.hw_rate);
+  const pensionRate = parseFloat(unionConfig.pension_rate);
 
   // ── Column widths ─────────────────────────────────────────
   ws.columns = [
@@ -234,11 +260,11 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
     { width: 18 },  // I: Notes
     { width: 2 },   // J: spacer
     { width: 12 },  // K: Job #
-    { width: 10 },  // L: # Emps
-    { width: 12 },  // M: Reg Hours
-    { width: 12 },  // N: Vac Hours
-    { width: 14 },  // O: H&W
-    { width: 14 },  // P: Pension
+    { width: 14 },  // L: H&W
+    { width: 14 },  // M: Pension
+    { width: 14 },  // N: Total
+    { width: 6 },   // O: checkmark (blank)
+    { width: 18 },  // P: Site Name (blank)
   ];
 
   // ── Styles ────────────────────────────────────────────────
@@ -449,25 +475,26 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
 
   ws.getCell(footerStart + 6, 3).value = 'GRAND TOTAL';
   ws.getCell(footerStart + 6, 3).font = { bold: true, size: 11 };
-  // Grand total = H&W + Pension + adjustments
-  ws.getCell(footerStart + 6, 7).value = {
-    formula: `G${footerStart + 1}+G${footerStart + 2}+G${footerStart + 4}+G${footerStart + 5}`,
+  // Grand total = H&W Total + Balance + Pension + Adjustments
+  const hwRow = footerStart + 1;
+  const balRow = footerStart + 2;
+  const penRow = footerStart + 3;
+  const adj1Row = footerStart + 4;
+  const adj2Row = footerStart + 5;
+  const grandRow = footerStart + 6;
+  ws.getCell(grandRow, 7).value = {
+    formula: `G${hwRow}+G${balRow}+H${penRow}+G${adj1Row}+G${adj2Row}`,
   };
-  ws.getCell(footerStart + 6, 7).numFmt = currencyFmt;
-  ws.getCell(footerStart + 6, 7).font = { bold: true, size: 11 };
-  ws.getCell(footerStart + 6, 8).value = {
-    formula: `H${footerStart + 3}+H${footerStart + 4}+H${footerStart + 5}`,
-  };
-  ws.getCell(footerStart + 6, 8).numFmt = currencyFmt;
-  ws.getCell(footerStart + 6, 8).font = { bold: true, size: 11 };
+  ws.getCell(grandRow, 7).numFmt = currencyFmt;
+  ws.getCell(grandRow, 7).font = { bold: true, size: 11 };
 
   // ── Job Summary (cols K-P) ────────────────────────────────
   // Header row 6
   ws.getCell('K6').value = 'JOB SUMMARY';
   ws.getCell('K6').font = { bold: true, size: 11 };
 
-  // Header row 7
-  const jobHeaders = ['Job #', '# Emps', 'Reg Hours', 'Vac Hours', 'H&W', 'Pension'];
+  // Header row 7: Job # | H&W | Pension | Total | (check) | Site Name
+  const jobHeaders = ['Job #', 'H&W', 'Pension', 'Total', '', 'Site Name'];
   jobHeaders.forEach((h, i) => {
     const cell = ws.getCell(7, 11 + i); // K=11
     cell.value = h;
@@ -476,7 +503,7 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
     cell.border = thinBorder;
   });
 
-  // Job summary data using SUMIF formulas
+  // Job summary data — SUMIF against employee data cols G (H&W) and H (Pension)
   jobSummary.forEach((job, idx) => {
     const rowNum = dataStartRow + idx;
 
@@ -484,28 +511,25 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
     ws.getCell(rowNum, 11).value = job.jobNumber;
     ws.getCell(rowNum, 11).border = thinBorder;
 
-    // L: # Emps — COUNTIF
-    ws.getCell(rowNum, 12).value = { formula: `COUNTIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}")` };
+    // L: H&W — SUMIF on col G
+    ws.getCell(rowNum, 12).value = { formula: `SUMIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}",G${dataStartRow}:G${lastDataRow})` };
+    ws.getCell(rowNum, 12).numFmt = currencyFmt;
     ws.getCell(rowNum, 12).border = thinBorder;
 
-    // M: Reg Hours — SUMIF
-    ws.getCell(rowNum, 13).value = { formula: `SUMIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}",D${dataStartRow}:D${lastDataRow})` };
-    ws.getCell(rowNum, 13).numFmt = numberFmt;
+    // M: Pension — SUMIF on col H
+    ws.getCell(rowNum, 13).value = { formula: `SUMIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}",H${dataStartRow}:H${lastDataRow})` };
+    ws.getCell(rowNum, 13).numFmt = currencyFmt;
     ws.getCell(rowNum, 13).border = thinBorder;
 
-    // N: Vac Hours — SUMIF
-    ws.getCell(rowNum, 14).value = { formula: `SUMIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}",F${dataStartRow}:F${lastDataRow})` };
-    ws.getCell(rowNum, 14).numFmt = numberFmt;
+    // N: Total = H&W + Pension
+    ws.getCell(rowNum, 14).value = { formula: `L${rowNum}+M${rowNum}` };
+    ws.getCell(rowNum, 14).numFmt = currencyFmt;
     ws.getCell(rowNum, 14).border = thinBorder;
 
-    // O: H&W — SUMIF
-    ws.getCell(rowNum, 15).value = { formula: `SUMIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}",G${dataStartRow}:G${lastDataRow})` };
-    ws.getCell(rowNum, 15).numFmt = currencyFmt;
+    // O: checkmark — blank
     ws.getCell(rowNum, 15).border = thinBorder;
 
-    // P: Pension — SUMIF
-    ws.getCell(rowNum, 16).value = { formula: `SUMIF(B${dataStartRow}:B${lastDataRow},"${job.jobNumber}",H${dataStartRow}:H${lastDataRow})` };
-    ws.getCell(rowNum, 16).numFmt = currencyFmt;
+    // P: Site Name — blank (manual entry)
     ws.getCell(rowNum, 16).border = thinBorder;
   });
 
@@ -517,12 +541,12 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
     ws.getCell(jobTotalRow, 11).value = 'TOTAL';
     ws.getCell(jobTotalRow, 11).font = boldFont;
 
-    ['L', 'M', 'N', 'O', 'P'].forEach((col, i) => {
+    ['L', 'M', 'N'].forEach((col, i) => {
       const cell = ws.getCell(jobTotalRow, 12 + i);
       cell.value = { formula: `SUM(${col}${dataStartRow}:${col}${jobLastRow})` };
       cell.font = boldFont;
       cell.border = thinBorder;
-      cell.numFmt = i >= 3 ? currencyFmt : numberFmt;
+      cell.numFmt = currencyFmt;
     });
   }
 
