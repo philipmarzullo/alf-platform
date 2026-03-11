@@ -332,18 +332,25 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
   i7.fill = headerFill;
   i7.border = thinBorder;
 
+  // ── Build warning lookup by empId ──────────────────────────
+  const minHours = unionConfig.min_hours_for_benefits || 0;
+  const empNotes = new Map(); // empId → note string
+
+  for (const emp of employees) {
+    const total = emp.regHours + emp.vacHours;
+    const notes = [];
+    if (total === 0) notes.push('0 total hours');
+    else if (total < 0) notes.push(`Negative hours (${Math.round(total * 100) / 100})`);
+    else if (total < 40) notes.push(`Low hours (${Math.round(total * 100) / 100})`);
+    if (minHours > 0 && total < minHours) notes.push(`Below ${minHours}hr minimum (${Math.round(total * 100) / 100} hrs)`);
+    if (notes.length) empNotes.set(emp.empId, notes.join('; '));
+  }
+
   // ── Data rows ─────────────────────────────────────────────
   const dataStartRow = 8;
-  const flaggedEmpIds = new Set();
 
   employees.forEach((emp, idx) => {
     const rowNum = dataStartRow + idx;
-    const totalHours = emp.regHours + emp.vacHours;
-
-    // Flag employees with 0 or negative hours
-    if (totalHours <= 0 || totalHours < 40) {
-      flaggedEmpIds.add(emp.empId);
-    }
 
     // A: Emp Id
     ws.getCell(rowNum, 1).value = emp.empId;
@@ -387,11 +394,14 @@ export async function generateExcelReport(employees, jobSummary, unionConfig, re
     hCell.numFmt = currencyFmt;
     hCell.border = thinBorder;
 
-    // I: Notes — blank
-    ws.getCell(rowNum, 9).border = thinBorder;
+    // I: Notes — warning reason if flagged
+    const noteCell = ws.getCell(rowNum, 9);
+    const noteText = empNotes.get(emp.empId);
+    if (noteText) noteCell.value = noteText;
+    noteCell.border = thinBorder;
 
     // Pink fill for flagged rows
-    if (flaggedEmpIds.has(emp.empId)) {
+    if (noteText) {
       for (let col = 1; col <= 9; col++) {
         ws.getCell(rowNum, col).fill = pinkFill;
       }
