@@ -33,6 +33,7 @@ import integrationsRouter from './routes/integrations.js';
 import embeddingsRouter from './routes/embeddings.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import qbrTemplatesRouter from './routes/qbrTemplates.js';
+import unionBenefitsRouter from './routes/unionBenefits.js';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -122,6 +123,7 @@ app.use('/api/integrations', auth, integrationsRouter);
 app.use('/api/embeddings', auth, embeddingsRouter);
 app.use('/api/workflow-runs', auth, workflowRunsRouter);
 app.use('/api/qbr-templates', auth, qbrTemplatesRouter);
+app.use('/api/union-benefits', auth, unionBenefitsRouter);
 
 // --- 404 ---
 app.use((req, res) => {
