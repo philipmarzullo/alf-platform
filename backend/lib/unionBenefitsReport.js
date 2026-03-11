@@ -10,12 +10,23 @@ import ExcelJS from 'exceljs';
  */
 export function parseWinTeamExcel(buffer) {
   const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+  // Prefer 'Original File' sheet, fall back to first sheet
+  const sheetName = workbook.SheetNames.includes('Original File')
+    ? 'Original File'
+    : workbook.SheetNames[0];
+  console.log(`[union-benefits] Sheets: [${workbook.SheetNames.join(', ')}] → using "${sheetName}"`);
+
+  const sheet = workbook.Sheets[sheetName];
   const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-  // Required columns (case-insensitive partial match)
+  // Column names to find — order matters: match longer names first to avoid
+  // "Hours" partial-matching "HoursTypeDescription"
+  const ALL_COLS = [
+    'HoursTypeDescription', 'JobNumber', 'EmployeeName', 'EmployeeNumber',
+    'EmployeeType', 'SSN', 'JobName', 'Hours',
+  ];
   const REQUIRED = ['JobNumber', 'EmployeeName', 'Hours', 'HoursTypeDescription'];
-  const OPTIONAL = ['EmployeeNumber', 'EmployeeType', 'SSN', 'JobName'];
 
   let headerRowIdx = -1;
   let colMap = {};
@@ -31,12 +42,16 @@ export function parseWinTeamExcel(buffer) {
 
     if (matchCount >= REQUIRED.length) {
       headerRowIdx = i;
-      // Build column map
-      for (let j = 0; j < headerCells.length; j++) {
-        const cell = headerCells[j];
-        for (const col of [...REQUIRED, ...OPTIONAL]) {
-          if (cell.toLowerCase().includes(col.toLowerCase())) {
+      // Build column map — match longer names first so "Hours" doesn't
+      // steal the index that belongs to "HoursTypeDescription"
+      const claimed = new Set();
+      for (const col of ALL_COLS) {
+        for (let j = 0; j < headerCells.length; j++) {
+          if (claimed.has(j)) continue;
+          if (headerCells[j].toLowerCase().includes(col.toLowerCase())) {
             colMap[col] = j;
+            claimed.add(j);
+            break;
           }
         }
       }
@@ -47,17 +62,25 @@ export function parseWinTeamExcel(buffer) {
   if (headerRowIdx === -1) {
     throw new Error(
       'Could not find header row in WinTeam file. Expected columns: ' +
-      REQUIRED.join(', ')
+      REQUIRED.join(', ') +
+      '. Sheets available: ' + workbook.SheetNames.join(', ')
     );
   }
 
+  console.log(`[union-benefits] Header at row ${headerRowIdx}, colMap:`, JSON.stringify(colMap));
+
   // Data rows start after header
   const dataRows = allRows.slice(headerRowIdx + 1).filter(row => {
-    // Skip empty rows
     if (!Array.isArray(row)) return false;
     const hasHours = colMap.Hours !== undefined && row[colMap.Hours] !== '' && row[colMap.Hours] !== null;
     const hasName = colMap.EmployeeName !== undefined && row[colMap.EmployeeName] !== '';
     return hasHours || hasName;
+  });
+
+  // Log first 5 rows for diagnostics
+  console.log(`[union-benefits] ${dataRows.length} data rows. First 5:`);
+  dataRows.slice(0, 5).forEach((row, i) => {
+    console.log(`  row[${i}]: EmpNum=${row[colMap.EmployeeNumber]}, Name=${row[colMap.EmployeeName]}, Job=${row[colMap.JobNumber]}, Hours=${row[colMap.Hours]}, Type=${row[colMap.HoursTypeDescription]}`);
   });
 
   return { colMap, rows: dataRows };
