@@ -33,101 +33,118 @@ const VIEW_MAP = {
 };
 
 /**
- * Build query templates with fully qualified view names.
- * :db is replaced with {database}.{schema} prefix at execution time.
+ * Build query templates with fully qualified Wavelytics WinTeam warehouse view names.
+ * Column aliases map WinTeam naming → sf_* table columns.
+ * Joins use surrogate keys (JOB_KEY, EMPLOYEE_KEY).
  * :1 is the company_filter bind variable for tenant isolation.
+ *
+ * Verified against AAEFS_WINTEAM.WAREHOUSE DESCRIBE output (2026-03-17):
+ *   DIM_JOB (103 cols)  → sf_dim_job: job_name, location, supervisor, company, tier, is_active
+ *   DIM_EMPLOYEE (54)   → sf_dim_employee: employee_number, first/last_name, role, hire_date, job_name
+ *   FACT_LABOR_BUDGET_TO_ACTUAL (19) → sf_fact_labor_budget_actual: job, period, budget/actual hrs/$
+ *   FACT_JOB_DAILY (71) → sf_fact_job_daily: job, date, headcount (safety metrics N/A in WinTeam)
+ *   FACT_WORK_SCHEDULE_TICKET (53)  → sf_fact_work_tickets: job, date, category, status, assigned_to
+ *   FACT_TIMEKEEPING (55) → sf_fact_timekeeping: employee, job, date, clock in/out, reg/ot/dt hours
  */
 function buildQueryMap(fqPrefix) {
+  const dj = `${fqPrefix}.DIM_JOB`;
+  const de = `${fqPrefix}.DIM_EMPLOYEE`;
+  const flba = `${fqPrefix}.FACT_LABOR_BUDGET_TO_ACTUAL`;
+  const fjd = `${fqPrefix}.FACT_JOB_DAILY`;
+  const fwst = `${fqPrefix}.FACT_WORK_SCHEDULE_TICKET`;
+  const ft = `${fqPrefix}.FACT_TIMEKEEPING`;
+
   return {
     sf_dim_job: `
       SELECT
-        job_name,
-        location,
-        supervisor,
-        company,
-        tier,
-        sq_footage,
-        is_active
-      FROM ${fqPrefix}.DIM_JOB
-      WHERE is_active = TRUE
-        AND company = :1
+        JOB_NAME                        AS job_name,
+        JOB_LOCATION_LABEL              AS location,
+        JOB_SUPERVISOR_DESCRIPTION      AS supervisor,
+        JOB_COMPANY_NAME                AS company,
+        JOB_TIER_01_CURRENT_VALUE_LABEL AS tier,
+        NULL                            AS sq_footage,
+        IS_JOB_ACTIVE_FLAG              AS is_active
+      FROM ${dj}
+      WHERE IS_JOB_ACTIVE_FLAG = 1
+        AND JOB_COMPANY_NAME = :1
     `,
 
     sf_dim_employee: `
       SELECT
-        e.employee_number,
-        e.first_name,
-        e.last_name,
-        e.role,
-        e.hire_date,
-        j.job_name,
-        e.hourly_rate
-      FROM ${fqPrefix}.DIM_EMPLOYEE e
-      LEFT JOIN ${fqPrefix}.DIM_JOB j ON e.job_id = j.job_id
-      WHERE j.company = :1
+        e.EMPLOYEE_NUMBER                 AS employee_number,
+        e.EMPLOYEE_FIRST_NAME             AS first_name,
+        e.EMPLOYEE_LAST_NAME              AS last_name,
+        e.EMPLOYEE_TYPE_LABEL             AS role,
+        e.EMPLOYEE_HIRE_DATE              AS hire_date,
+        j.JOB_NAME                        AS job_name,
+        NULL                              AS hourly_rate
+      FROM ${de} e
+      JOIN ${dj} j
+        ON j.JOB_NUMBER = e.EMPLOYEE_PRIMARY_JOB_NUMBER
+      WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_labor_budget_actual: `
       SELECT
-        j.job_name,
-        f.period_start,
-        f.period_end,
-        f.budget_hours,
-        f.actual_hours,
-        f.budget_dollars,
-        f.actual_dollars,
-        f.ot_hours,
-        f.ot_dollars
-      FROM ${fqPrefix}.FACT_LABOR_BUDGET_TO_ACTUAL f
-      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
-      WHERE j.company = :1
+        j.JOB_NAME              AS job_name,
+        f.DATE_KEY              AS period_start,
+        f.DATE_KEY              AS period_end,
+        f.BUDGET_HOURS          AS budget_hours,
+        f.ACTUAL_HOURS          AS actual_hours,
+        f.BUDGET_DOLLAR_AMOUNT  AS budget_dollars,
+        f.ACTUAL_DOLLAR_AMOUNT  AS actual_dollars,
+        0                       AS ot_hours,
+        0                       AS ot_dollars
+      FROM ${flba} f
+      JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_job_daily: `
       SELECT
-        j.job_name,
-        f.date_key,
-        f.audits,
-        f.corrective_actions,
-        f.recordable_incidents,
-        f.good_saves,
-        f.near_misses,
-        f.trir,
-        f.headcount
-      FROM ${fqPrefix}.FACT_JOB_DAILY f
-      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
-      WHERE j.company = :1
+        j.JOB_NAME                                AS job_name,
+        f.DATE_KEY                                AS date_key,
+        0                                         AS audits,
+        0                                         AS corrective_actions,
+        0                                         AS recordable_incidents,
+        0                                         AS good_saves,
+        0                                         AS near_misses,
+        0                                         AS trir,
+        f.SCHEDULE_POSITION_ACTUAL_TOTAL_NUMBER   AS headcount
+      FROM ${fjd} f
+      JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_work_tickets: `
       SELECT
-        j.job_name,
-        f.date_key,
-        f.category,
-        f.status,
-        f.priority,
-        f.assigned_to,
-        f.completed_at
-      FROM ${fqPrefix}.FACT_WORK_SCHEDULE_TICKET f
-      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
-      WHERE j.company = :1
+        j.JOB_NAME                            AS job_name,
+        f.WORK_TICKET_SCHEDULED_DATE_KEY      AS date_key,
+        f.WORK_SCHEDULE_TYPE_LABEL            AS category,
+        f.WORK_TICKET_STATUS_LABEL            AS status,
+        NULL                                  AS priority,
+        f.WORK_TICKET_SUPERVISOR_DESCRIPTION  AS assigned_to,
+        f.WORK_TICKET_COMPLETED_DATE_KEY      AS completed_at
+      FROM ${fwst} f
+      JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_timekeeping: `
       SELECT
-        e.employee_number,
-        j.job_name,
-        f.date_key,
-        f.clock_in,
-        f.clock_out,
-        f.regular_hours,
-        f.ot_hours,
-        f.dt_hours,
-        f.punch_status
-      FROM ${fqPrefix}.FACT_TIMEKEEPING f
-      JOIN ${fqPrefix}.DIM_EMPLOYEE e ON f.employee_id = e.employee_id
-      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
-      WHERE j.company = :1
+        e.EMPLOYEE_NUMBER              AS employee_number,
+        j.JOB_NAME                     AS job_name,
+        f.WORK_DATE_KEY                AS date_key,
+        f.IN_TIME_KEY                  AS clock_in,
+        f.OUT_TIME_KEY                 AS clock_out,
+        f.TIMEKEEPING_REGULAR_HOURS    AS regular_hours,
+        f.TIMEKEEPING_OVERTIME_HOURS   AS ot_hours,
+        f.TIMEKEEPING_DOUBLETIME_HOURS AS dt_hours,
+        NULL                           AS punch_status
+      FROM ${ft} f
+      JOIN ${de} e ON e.EMPLOYEE_KEY = f.EMPLOYEE_KEY
+      JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      WHERE j.JOB_COMPANY_NAME = :1
     `,
   };
 }
