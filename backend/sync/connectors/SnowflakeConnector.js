@@ -19,102 +19,118 @@ import BaseConnector from './BaseConnector.js';
 snowflake.configure({ ocspFailOpen: true });
 
 /**
- * Query templates with :company_filter placeholder.
- * Every query filters through dim_job.company to ensure tenant isolation at the source.
- * The placeholder is replaced with a parameterized bind variable at execution time.
+ * View name mapping: sf_* target table → Snowflake view name.
+ * Queries use fully qualified names built at runtime from config:
+ *   {tenant_database}.{schema}.{view_name}
  */
-const TABLE_QUERY_MAP = {
-  sf_dim_job: `
-    SELECT
-      job_name,
-      location,
-      supervisor,
-      company,
-      tier,
-      sq_footage,
-      is_active
-    FROM dim_job
-    WHERE is_active = TRUE
-      AND company = :1
-  `,
-
-  sf_dim_employee: `
-    SELECT
-      e.employee_number,
-      e.first_name,
-      e.last_name,
-      e.role,
-      e.hire_date,
-      j.job_name,
-      e.hourly_rate
-    FROM dim_employee e
-    LEFT JOIN dim_job j ON e.job_id = j.job_id
-    WHERE j.company = :1
-  `,
-
-  sf_fact_labor_budget_actual: `
-    SELECT
-      j.job_name,
-      f.period_start,
-      f.period_end,
-      f.budget_hours,
-      f.actual_hours,
-      f.budget_dollars,
-      f.actual_dollars,
-      f.ot_hours,
-      f.ot_dollars
-    FROM fact_labor_budget_to_actual f
-    JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :1
-  `,
-
-  sf_fact_job_daily: `
-    SELECT
-      j.job_name,
-      f.date_key,
-      f.audits,
-      f.corrective_actions,
-      f.recordable_incidents,
-      f.good_saves,
-      f.near_misses,
-      f.trir,
-      f.headcount
-    FROM fact_job_daily f
-    JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :1
-  `,
-
-  sf_fact_work_tickets: `
-    SELECT
-      j.job_name,
-      f.date_key,
-      f.category,
-      f.status,
-      f.priority,
-      f.assigned_to,
-      f.completed_at
-    FROM fact_work_schedule_ticket f
-    JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :1
-  `,
-
-  sf_fact_timekeeping: `
-    SELECT
-      e.employee_number,
-      j.job_name,
-      f.date_key,
-      f.clock_in,
-      f.clock_out,
-      f.regular_hours,
-      f.ot_hours,
-      f.dt_hours,
-      f.punch_status
-    FROM fact_timekeeping f
-    JOIN dim_employee e ON f.employee_id = e.employee_id
-    JOIN dim_job j ON f.job_id = j.job_id
-    WHERE j.company = :1
-  `,
+const VIEW_MAP = {
+  sf_dim_job:                  'DIM_JOB',
+  sf_dim_employee:             'DIM_EMPLOYEE',
+  sf_fact_labor_budget_actual: 'FACT_LABOR_BUDGET_TO_ACTUAL',
+  sf_fact_job_daily:           'FACT_JOB_DAILY',
+  sf_fact_work_tickets:        'FACT_WORK_SCHEDULE_TICKET',
+  sf_fact_timekeeping:         'FACT_TIMEKEEPING',
 };
+
+/**
+ * Build query templates with fully qualified view names.
+ * :db is replaced with {database}.{schema} prefix at execution time.
+ * :1 is the company_filter bind variable for tenant isolation.
+ */
+function buildQueryMap(fqPrefix) {
+  return {
+    sf_dim_job: `
+      SELECT
+        job_name,
+        location,
+        supervisor,
+        company,
+        tier,
+        sq_footage,
+        is_active
+      FROM ${fqPrefix}.DIM_JOB
+      WHERE is_active = TRUE
+        AND company = :1
+    `,
+
+    sf_dim_employee: `
+      SELECT
+        e.employee_number,
+        e.first_name,
+        e.last_name,
+        e.role,
+        e.hire_date,
+        j.job_name,
+        e.hourly_rate
+      FROM ${fqPrefix}.DIM_EMPLOYEE e
+      LEFT JOIN ${fqPrefix}.DIM_JOB j ON e.job_id = j.job_id
+      WHERE j.company = :1
+    `,
+
+    sf_fact_labor_budget_actual: `
+      SELECT
+        j.job_name,
+        f.period_start,
+        f.period_end,
+        f.budget_hours,
+        f.actual_hours,
+        f.budget_dollars,
+        f.actual_dollars,
+        f.ot_hours,
+        f.ot_dollars
+      FROM ${fqPrefix}.FACT_LABOR_BUDGET_TO_ACTUAL f
+      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
+      WHERE j.company = :1
+    `,
+
+    sf_fact_job_daily: `
+      SELECT
+        j.job_name,
+        f.date_key,
+        f.audits,
+        f.corrective_actions,
+        f.recordable_incidents,
+        f.good_saves,
+        f.near_misses,
+        f.trir,
+        f.headcount
+      FROM ${fqPrefix}.FACT_JOB_DAILY f
+      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
+      WHERE j.company = :1
+    `,
+
+    sf_fact_work_tickets: `
+      SELECT
+        j.job_name,
+        f.date_key,
+        f.category,
+        f.status,
+        f.priority,
+        f.assigned_to,
+        f.completed_at
+      FROM ${fqPrefix}.FACT_WORK_SCHEDULE_TICKET f
+      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
+      WHERE j.company = :1
+    `,
+
+    sf_fact_timekeeping: `
+      SELECT
+        e.employee_number,
+        j.job_name,
+        f.date_key,
+        f.clock_in,
+        f.clock_out,
+        f.regular_hours,
+        f.ot_hours,
+        f.dt_hours,
+        f.punch_status
+      FROM ${fqPrefix}.FACT_TIMEKEEPING f
+      JOIN ${fqPrefix}.DIM_EMPLOYEE e ON f.employee_id = e.employee_id
+      JOIN ${fqPrefix}.DIM_JOB j ON f.job_id = j.job_id
+      WHERE j.company = :1
+    `,
+  };
+}
 
 export default class SnowflakeConnector extends BaseConnector {
   /** Runner checks this to resolve platform creds instead of tenant creds */
@@ -123,6 +139,7 @@ export default class SnowflakeConnector extends BaseConnector {
   constructor(tenantId, config, credentials) {
     super(tenantId, config, credentials);
     this.connection = null;
+    this.queryMap = null;
   }
 
   async connect() {
@@ -150,13 +167,20 @@ export default class SnowflakeConnector extends BaseConnector {
       }
     }
 
+    const database = this.config.tenant_database;
+    const schema = this.config.schema || 'PUBLIC';
+
+    // Build fully qualified query map: DATABASE.SCHEMA.VIEW
+    const fqPrefix = `${database}.${schema}`;
+    this.queryMap = buildQueryMap(fqPrefix);
+
     this.connection = snowflake.createConnection({
       account: this.credentials.account,
       username: this.credentials.username,
       password: this.credentials.password,
       warehouse: this.credentials.warehouse,
-      database: this.config.tenant_database,
-      schema: this.config.schema || 'PUBLIC',
+      database,
+      schema,
       role: this.credentials.role || 'ALF_SERVICE_ROLE',
       application: 'Alf_Platform',
     });
@@ -172,7 +196,7 @@ export default class SnowflakeConnector extends BaseConnector {
   async fetchTable(targetTable) {
     if (!this.connection) throw new Error('Not connected');
 
-    const queryTemplate = TABLE_QUERY_MAP[targetTable];
+    const queryTemplate = this.queryMap?.[targetTable];
     if (!queryTemplate) {
       throw new Error(`No Snowflake query mapped for table: ${targetTable}`);
     }
@@ -237,4 +261,4 @@ export default class SnowflakeConnector extends BaseConnector {
   }
 }
 
-export { TABLE_QUERY_MAP };
+export { VIEW_MAP, buildQueryMap };
