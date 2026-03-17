@@ -244,6 +244,25 @@ export default class SnowflakeConnector extends BaseConnector {
     return normalized;
   }
 
+  /**
+   * Execute an arbitrary SQL query against Snowflake.
+   * Used by the agent querySnowflake tool for direct view access.
+   */
+  async queryView(sqlText, binds = []) {
+    if (!this.connection) throw new Error('Not connected');
+    const rows = await new Promise((resolve, reject) => {
+      this.connection.execute({
+        sqlText,
+        binds,
+        complete: (err, stmt, rows) => {
+          if (err) reject(new Error(`Snowflake query failed: ${err.message}`));
+          else resolve(rows || []);
+        },
+      });
+    });
+    return rows.map(row => this._normalizeRow(row));
+  }
+
   async disconnect() {
     if (this.connection) {
       await new Promise((resolve) => {

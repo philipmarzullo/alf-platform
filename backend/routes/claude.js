@@ -3,6 +3,8 @@ import rateLimit from '../middleware/rateLimit.js';
 import { resolveApiKey } from '../lib/resolveApiKey.js';
 import { extractMemories } from './memory.js';
 import { semanticSearch, hasEmbeddings } from '../lib/semanticSearch.js';
+import { SNOWFLAKE_QUERY_TOOL, executeSnowflakeQuery } from '../lib/snowflakeQueryTool.js';
+import SnowflakeConnector from '../sync/connectors/SnowflakeConnector.js';
 
 const router = Router();
 
@@ -538,190 +540,264 @@ router.post('/', rateLimit, async (req, res) => {
       }
     }
 
-    const anthropicResponse = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model,
-        system: enrichedSystem || undefined,
-        messages,
-        max_tokens: max_tokens || 4096,
-      }),
-    });
+    // ── Snowflake direct query setup ──
+    let snowflakeDirect = false;
+    let sfConfig = null;
+    if (effectiveTenantId) {
+      const { data: tRow } = await req.supabase
+        .from('alf_tenants')
+        .select('snowflake_direct')
+        .eq('id', effectiveTenantId)
+        .single();
+      snowflakeDirect = tRow?.snowflake_direct || false;
 
-    const data = await anthropicResponse.json();
-
-    // If Anthropic returned an error, forward it
-    if (!anthropicResponse.ok) {
-      console.error('[claude] Anthropic error:', data.error?.message || anthropicResponse.status);
-      return res.status(anthropicResponse.status).json({
-        error: data.error?.message || `Anthropic API error: ${anthropicResponse.status}`,
-      });
-    }
-
-    // Log usage asynchronously — don't block the response
-    const inputTokens = data.usage?.input_tokens || 0;
-    const outputTokens = data.usage?.output_tokens || 0;
-    console.log(`[claude] OK — ${model} | key: ${keySource} | tokens: ${inputTokens}+${outputTokens}`);
-
-    req.supabase
-      .from('alf_usage_logs')
-      .insert({
-        tenant_id: effectiveTenantId || null,
-        user_id: req.user.id,
-        action: 'agent_call',
-        agent_key: agent_key || null,
-        tokens_input: inputTokens,
-        tokens_output: outputTokens,
-        model,
-      })
-      .then(({ error }) => {
-        if (error) console.warn('[claude] Usage log failed:', error.message);
-      });
-
-    // Attach skill execution modes so frontend can render mode-appropriate UI
-    let execution_context = null;
-    if (effectiveTenantId && agent_key) {
-      const modes = await getSkillExecutionModes(req.supabase, effectiveTenantId, agent_key);
-      if (modes?.length) execution_context = { skills: modes };
-    }
-
-    // Fire-and-forget: route agent output to user tasks for draft/review modes
-    if (effectiveTenantId && agent_key && execution_context?.skills?.length) {
-      const responseText = data.content?.[0]?.text || '';
-      for (const skill of execution_context.skills) {
-        // Automated mode: attempt email send if tenant has email connected
-        if (skill.mode === 'automated') {
-          const subjectLine = responseText.match(/^Subject:\s*(.+)$/m);
-          const toLine = responseText.match(/^To:\s*(.+)$/m);
-          if (subjectLine && toLine) {
-            // Check for email connection
-            const { data: emailConn } = await req.supabase
-              .from('tenant_connections')
-              .select('id')
-              .eq('tenant_id', effectiveTenantId)
-              .eq('connection_type', 'email')
-              .eq('status', 'connected')
-              .maybeSingle();
-            if (emailConn) {
-              // Fire-and-forget auto-send
-              (async () => {
-                try {
-                  const { getValidMsToken } = await import('../lib/msTokens.js');
-                  const token = await getValidMsToken(effectiveTenantId);
-                  const emailBody = responseText
-                    .replace(/^Subject:\s*.+$/m, '')
-                    .replace(/^To:\s*.+$/m, '')
-                    .trim();
-                  const toAddresses = toLine[1].split(',').map(e => e.trim()).filter(Boolean);
-                  const graphRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-                    method: 'POST',
-                    headers: {
-                      Authorization: `Bearer ${token.access_token}`,
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                      message: {
-                        subject: subjectLine[1].trim(),
-                        body: { contentType: 'HTML', content: `<div style="font-family:sans-serif;font-size:14px;line-height:1.6;">${emailBody.replace(/\n/g, '<br>')}</div>` },
-                        toRecipients: toAddresses.map(e => ({ emailAddress: { address: e } })),
-                      },
-                      saveToSentItems: true,
-                    }),
-                  });
-                  if (graphRes.ok) {
-                    console.log(`[claude] Auto-sent email for skill "${skill.title}" to ${toAddresses.join(', ')}`);
-                    const { recordActionExecution } = await import('./automationPreferences.js');
-                    recordActionExecution(effectiveTenantId, agent_key, skill.skill_id, 'agent_skill', false);
-                  } else {
-                    console.warn(`[claude] Auto-send failed: ${graphRes.status}`);
-                  }
-                } catch (err) {
-                  console.warn('[claude] Automated email send failed:', err.message);
-                }
-              })();
-            }
-          }
-          continue;
-        }
-        // Check if the response mentions this skill's output markers
-        const isDraft = responseText.includes('[DRAFT]') && skill.mode === 'draft';
-        const isReview = responseText.includes('[PENDING REVIEW]') && skill.mode === 'review';
-        if (!isDraft && !isReview) continue;
-
-        // Look up SOP step assignments for this skill
-        req.supabase
-          .from('tenant_sop_steps')
-          .select(`
-            id,
-            tenant_sop_assignments(id, assigned_to_user_id, assigned_to_role, assignment_type)
-          `)
+      if (snowflakeDirect) {
+        const { data: sc } = await req.supabase
+          .from('sync_configs')
+          .select('config')
           .eq('tenant_id', effectiveTenantId)
-          .eq('automation_action_id', skill.skill_id)
-          .then(async ({ data: steps }) => {
-            if (!steps?.length) return;
-            for (const step of steps) {
-              const assignments = step.tenant_sop_assignments || [];
-              // Find reviewer or owner to route to
-              const target = assignments.find(a => a.assignment_type === 'reviewer')
-                || assignments.find(a => a.assignment_type === 'owner');
-              if (!target) continue;
+          .eq('connector_type', 'snowflake')
+          .single();
+        sfConfig = sc?.config;
 
-              // Resolve user IDs from role if needed
-              let userIds = [];
-              if (target.assigned_to_user_id) {
-                userIds = [target.assigned_to_user_id];
-              } else if (target.assigned_to_role) {
-                const { data: roleUsers } = await req.supabase
-                  .from('profiles')
-                  .select('id')
-                  .eq('tenant_id', effectiveTenantId)
-                  .eq('role', target.assigned_to_role);
-                userIds = (roleUsers || []).map(u => u.id);
-              }
+        const { data: cred } = await req.supabase
+          .from('alf_platform_credentials')
+          .select('credentials')
+          .eq('service_type', 'snowflake')
+          .single();
+        if (cred) sfConfig._credentials = cred.credentials;
+      }
+    }
 
-              // Create tasks for each target user
-              for (const uid of userIds) {
-                await req.supabase
-                  .from('tenant_user_tasks')
-                  .insert({
-                    tenant_id: effectiveTenantId,
-                    user_id: uid,
-                    sop_step_id: step.id,
-                    sop_assignment_id: target.id,
-                    source_type: 'agent_output',
-                    source_reference_id: skill.skill_id,
-                    title: `${isDraft ? 'Review draft' : 'Approve'}: ${skill.title}`,
-                    description: `Agent produced ${isDraft ? 'a draft' : 'output pending review'} for "${skill.title}". Please review and take action.`,
-                    agent_output: { text: responseText, model, agent_key },
-                  });
+    const tools = snowflakeDirect && sfConfig ? [SNOWFLAKE_QUERY_TOOL] : [];
+    let sfConnector = null;
+
+    try {
+      let apiMessages = [...messages];
+      let totalInput = 0, totalOutput = 0;
+      let data;
+      const MAX_ROUNDS = 10;
+
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const anthropicResponse = await fetch(ANTHROPIC_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': ANTHROPIC_VERSION,
+          },
+          body: JSON.stringify({
+            model,
+            system: enrichedSystem || undefined,
+            messages: apiMessages,
+            max_tokens: max_tokens || 4096,
+            ...(tools.length ? { tools } : {}),
+          }),
+        });
+
+        data = await anthropicResponse.json();
+
+        if (!anthropicResponse.ok) {
+          console.error('[claude] Anthropic error:', data.error?.message || anthropicResponse.status);
+          return res.status(anthropicResponse.status).json({
+            error: data.error?.message || `Anthropic API error: ${anthropicResponse.status}`,
+          });
+        }
+
+        totalInput += data.usage?.input_tokens || 0;
+        totalOutput += data.usage?.output_tokens || 0;
+
+        if (data.stop_reason !== 'tool_use') break;
+
+        // Lazy-connect Snowflake on first tool_use
+        if (!sfConnector && sfConfig) {
+          sfConnector = new SnowflakeConnector(effectiveTenantId, sfConfig, sfConfig._credentials);
+          await sfConnector.connect();
+          console.log(`[claude] Snowflake connected for tenant ${effectiveTenantId}`);
+        }
+
+        // Execute tool calls, build results
+        const toolResults = [];
+        for (const block of data.content.filter(b => b.type === 'tool_use')) {
+          console.log(`[claude] Tool call: ${block.name}(${JSON.stringify(block.input).slice(0, 200)})`);
+          try {
+            const result = await executeSnowflakeQuery(block.input, sfConnector, sfConfig);
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
+          } catch (err) {
+            console.warn(`[claude] Tool error: ${err.message}`);
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify({ error: err.message }), is_error: true });
+          }
+        }
+
+        apiMessages.push({ role: 'assistant', content: data.content });
+        apiMessages.push({ role: 'user', content: toolResults });
+        console.log(`[claude] Tool round ${round + 1} complete, continuing...`);
+      }
+
+      const inputTokens = totalInput;
+      const outputTokens = totalOutput;
+      console.log(`[claude] OK — ${model} | key: ${keySource} | tokens: ${inputTokens}+${outputTokens}${sfConnector ? ' | snowflake_direct' : ''}`);
+
+      req.supabase
+        .from('alf_usage_logs')
+        .insert({
+          tenant_id: effectiveTenantId || null,
+          user_id: req.user.id,
+          action: 'agent_call',
+          agent_key: agent_key || null,
+          tokens_input: inputTokens,
+          tokens_output: outputTokens,
+          model,
+        })
+        .then(({ error }) => {
+          if (error) console.warn('[claude] Usage log failed:', error.message);
+        });
+
+      // Attach skill execution modes so frontend can render mode-appropriate UI
+      let execution_context = null;
+      if (effectiveTenantId && agent_key) {
+        const modes = await getSkillExecutionModes(req.supabase, effectiveTenantId, agent_key);
+        if (modes?.length) execution_context = { skills: modes };
+      }
+
+      // Fire-and-forget: route agent output to user tasks for draft/review modes
+      if (effectiveTenantId && agent_key && execution_context?.skills?.length) {
+        const responseText = data.content?.[0]?.text || '';
+        for (const skill of execution_context.skills) {
+          // Automated mode: attempt email send if tenant has email connected
+          if (skill.mode === 'automated') {
+            const subjectLine = responseText.match(/^Subject:\s*(.+)$/m);
+            const toLine = responseText.match(/^To:\s*(.+)$/m);
+            if (subjectLine && toLine) {
+              // Check for email connection
+              const { data: emailConn } = await req.supabase
+                .from('tenant_connections')
+                .select('id')
+                .eq('tenant_id', effectiveTenantId)
+                .eq('connection_type', 'email')
+                .eq('status', 'connected')
+                .maybeSingle();
+              if (emailConn) {
+                // Fire-and-forget auto-send
+                (async () => {
+                  try {
+                    const { getValidMsToken } = await import('../lib/msTokens.js');
+                    const token = await getValidMsToken(effectiveTenantId);
+                    const emailBody = responseText
+                      .replace(/^Subject:\s*.+$/m, '')
+                      .replace(/^To:\s*.+$/m, '')
+                      .trim();
+                    const toAddresses = toLine[1].split(',').map(e => e.trim()).filter(Boolean);
+                    const graphRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+                      method: 'POST',
+                      headers: {
+                        Authorization: `Bearer ${token.access_token}`,
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        message: {
+                          subject: subjectLine[1].trim(),
+                          body: { contentType: 'HTML', content: `<div style="font-family:sans-serif;font-size:14px;line-height:1.6;">${emailBody.replace(/\n/g, '<br>')}</div>` },
+                          toRecipients: toAddresses.map(e => ({ emailAddress: { address: e } })),
+                        },
+                        saveToSentItems: true,
+                      }),
+                    });
+                    if (graphRes.ok) {
+                      console.log(`[claude] Auto-sent email for skill "${skill.title}" to ${toAddresses.join(', ')}`);
+                      const { recordActionExecution } = await import('./automationPreferences.js');
+                      recordActionExecution(effectiveTenantId, agent_key, skill.skill_id, 'agent_skill', false);
+                    } else {
+                      console.warn(`[claude] Auto-send failed: ${graphRes.status}`);
+                    }
+                  } catch (err) {
+                    console.warn('[claude] Automated email send failed:', err.message);
+                  }
+                })();
               }
             }
-          })
-          .catch(err => {
-            console.warn('[claude] Task routing failed:', err.message);
-          });
+            continue;
+          }
+          // Check if the response mentions this skill's output markers
+          const isDraft = responseText.includes('[DRAFT]') && skill.mode === 'draft';
+          const isReview = responseText.includes('[PENDING REVIEW]') && skill.mode === 'review';
+          if (!isDraft && !isReview) continue;
+
+          // Look up SOP step assignments for this skill
+          req.supabase
+            .from('tenant_sop_steps')
+            .select(`
+              id,
+              tenant_sop_assignments(id, assigned_to_user_id, assigned_to_role, assignment_type)
+            `)
+            .eq('tenant_id', effectiveTenantId)
+            .eq('automation_action_id', skill.skill_id)
+            .then(async ({ data: steps }) => {
+              if (!steps?.length) return;
+              for (const step of steps) {
+                const assignments = step.tenant_sop_assignments || [];
+                // Find reviewer or owner to route to
+                const target = assignments.find(a => a.assignment_type === 'reviewer')
+                  || assignments.find(a => a.assignment_type === 'owner');
+                if (!target) continue;
+
+                // Resolve user IDs from role if needed
+                let userIds = [];
+                if (target.assigned_to_user_id) {
+                  userIds = [target.assigned_to_user_id];
+                } else if (target.assigned_to_role) {
+                  const { data: roleUsers } = await req.supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('tenant_id', effectiveTenantId)
+                    .eq('role', target.assigned_to_role);
+                  userIds = (roleUsers || []).map(u => u.id);
+                }
+
+                // Create tasks for each target user
+                for (const uid of userIds) {
+                  await req.supabase
+                    .from('tenant_user_tasks')
+                    .insert({
+                      tenant_id: effectiveTenantId,
+                      user_id: uid,
+                      sop_step_id: step.id,
+                      sop_assignment_id: target.id,
+                      source_type: 'agent_output',
+                      source_reference_id: skill.skill_id,
+                      title: `${isDraft ? 'Review draft' : 'Approve'}: ${skill.title}`,
+                      description: `Agent produced ${isDraft ? 'a draft' : 'output pending review'} for "${skill.title}". Please review and take action.`,
+                      agent_output: { text: responseText, model, agent_key },
+                    });
+                }
+              }
+            })
+            .catch(err => {
+              console.warn('[claude] Task routing failed:', err.message);
+            });
+        }
+      }
+
+      // Fire-and-forget memory extraction from agent conversations
+      if (effectiveTenantId && agent_key && messages.length >= 4) {
+        const responseText = data.content?.[0]?.text || '';
+        if (responseText) {
+          const dept = agentRow?.knowledge_scopes?.[0] || 'general';
+          const conversationText = messages
+            .slice(-4)
+            .map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
+            .join('\n\n');
+          extractMemories(effectiveTenantId, conversationText, 'agent_interaction', null, dept);
+        }
+      }
+
+      res.json({ ...data, execution_context });
+    } finally {
+      if (sfConnector) {
+        await sfConnector.disconnect();
+        console.log(`[claude] Snowflake disconnected`);
       }
     }
-
-    // Fire-and-forget memory extraction from agent conversations
-    if (effectiveTenantId && agent_key && messages.length >= 4) {
-      const responseText = data.content?.[0]?.text || '';
-      if (responseText) {
-        const dept = agentRow?.knowledge_scopes?.[0] || 'general';
-        const conversationText = messages
-          .slice(-4)
-          .map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
-          .join('\n\n');
-        extractMemories(effectiveTenantId, conversationText, 'agent_interaction', null, dept);
-      }
-    }
-
-    res.json({ ...data, execution_context });
   } catch (err) {
     console.error('[claude] Proxy error:', err.message);
     res.status(502).json({ error: 'Failed to reach AI service' });
