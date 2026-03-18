@@ -2130,6 +2130,10 @@ router.get('/:tenantId/:domain', async (req, res) => {
         itemType: req.query.itemType || null,
         inspectionType: req.query.inspectionType || null,
         ticketType: req.query.ticketType || null,
+        vp: req.query.vp || null,
+        manager: req.query.manager || null,
+        jobName: req.query.jobName || null,
+        jobNumber: req.query.jobNumber || null,
       };
       const data = await getSnowflakeDomainData(req.supabase, effectiveTenantId, domain, sfFilters);
       setCache(key, data);

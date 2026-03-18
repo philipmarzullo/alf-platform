@@ -139,111 +139,221 @@ async function queryActionItems(supabase, tenantId, filters) {
 async function queryInspections(supabase, tenantId, filters) {
   const { connector, config } = await getConnector(supabase, tenantId);
   const prefix = fq(config);
-  const binds = [config.company_filter];
 
-  const headerConditions = [
-    `c.JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
-  ];
-  headerConditions.push(...dateFilter('d.CALENDAR_DATE', filters, binds));
-  headerConditions.push(...jobFilter('c.JOB_KEY', filters, binds));
-  if (filters.inspectionType) {
-    binds.push(filters.inspectionType);
-    headerConditions.push(`c.CHECKPOINT_TEMPLATE_TYPE_LABEL = :${binds.length}`);
+  // Helpers to build repeated filter conditions
+  function jobConds(alias, binds) {
+    const c = [];
+    if (filters.vp) { binds.push(filters.vp); c.push(`${alias}.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds.length}`); }
+    if (filters.manager) { binds.push(filters.manager); c.push(`${alias}.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds.length}`); }
+    if (filters.jobName) { binds.push(`%${filters.jobName}%`); c.push(`${alias}.JOB_NAME ILIKE :${binds.length}`); }
+    if (filters.jobNumber) { binds.push(`%${filters.jobNumber}%`); c.push(`${alias}.JOB_NUMBER ILIKE :${binds.length}`); }
+    return c;
   }
+  function inspTypeCond(alias, binds) {
+    if (!filters.inspectionType) return [];
+    binds.push(filters.inspectionType);
+    return [`${alias}.CHECKPOINT_TEMPLATE_DESCRIPTION = :${binds.length}`];
+  }
+  const inspTypeJoin = (alias) => filters.inspectionType
+    ? `JOIN ${prefix}.FACT_CHECKPOINT fc2 ON fc2.CHECKPOINT_ID = ${alias}.CHECKPOINT_ID`
+    : '';
+  const inspTypeCondLi = (binds) => filters.inspectionType ? inspTypeCond('fc2', binds) : [];
 
-  // Query 1: Inspection headers — join DIM_DATE for performed date
-  const headerSql = `
-    SELECT
-      c.CHECKPOINT_ID,
-      c.CHECKPOINT_KEY,
-      d.CALENDAR_DATE AS PERFORMED_DATE,
-      c.CHECKPOINT_SCORE_PERCENT,
-      c.CHECKPOINT_EVALUATED_ITEM_QUANTITY,
-      c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY,
-      c.CHECKPOINT_TEMPLATE_TYPE_LABEL,
-      c.CHECKPOINT_ADDED_TIMESTAMP,
-      j.JOB_NUMBER,
-      j.JOB_NAME
-    FROM ${prefix}.FACT_CHECKPOINT c
-    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = c.JOB_KEY
-    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = c.CHECKPOINT_PERFORMED_DATE_KEY
-    WHERE ${headerConditions.join(' AND ')}
-    ORDER BY d.CALENDAR_DATE DESC
-    LIMIT 2000
+  // Q1: Inspection count (KPI — COUNT DISTINCT CHECKPOINT_ID)
+  const b1 = [config.company_filter];
+  const c1 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b1), ...jobConds('j', b1), ...inspTypeCond('fc', b1)];
+  const q1 = `
+    SELECT COUNT(DISTINCT fc.CHECKPOINT_ID) AS cnt
+    FROM ${prefix}.FACT_CHECKPOINT fc
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = fc.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = fc.CHECKPOINT_PERFORMED_DATE_KEY
+    WHERE ${c1.join(' AND ')}
   `;
 
-  // Query 2: Deficiency line items — join DIM_DATE for performed date
-  const binds2 = [config.company_filter];
-  const lineConditions = [
-    `li.JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
-    `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
-  ];
-  lineConditions.push(...dateFilter('d2.CALENDAR_DATE', filters, binds2));
-  lineConditions.push(...jobFilter('li.JOB_KEY', filters, binds2));
+  // Q2: Job Detail — line items per job (also feeds KPIs: items total + deficient)
+  const b2 = [config.company_filter];
+  const c2 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b2), ...jobConds('j', b2), ...inspTypeCondLi(b2)];
+  const q2 = `
+    SELECT
+      j.JOB_KEY, j.JOB_NUMBER, j.JOB_NAME,
+      COUNT(*) AS total_items,
+      SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items
+    FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+    ${inspTypeJoin('li')}
+    WHERE ${c2.join(' AND ')}
+    GROUP BY j.JOB_KEY, j.JOB_NUMBER, j.JOB_NAME
+    ORDER BY deficient_items DESC
+  `;
 
-  const lineSql = `
+  // Q3: Weekly deficiency trend
+  const b3 = [config.company_filter];
+  const c3 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b3), ...jobConds('j', b3), ...inspTypeCondLi(b3)];
+  const q3 = `
+    SELECT
+      DATE_TRUNC('week', d.CALENDAR_DATE) AS period,
+      COUNT(*) AS total_items,
+      SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items
+    FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+    ${inspTypeJoin('li')}
+    WHERE ${c3.join(' AND ')}
+    GROUP BY DATE_TRUNC('week', d.CALENDAR_DATE)
+    ORDER BY period
+  `;
+
+  // Q4: Monthly deficiency trend
+  const b4 = [config.company_filter];
+  const c4 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b4), ...jobConds('j', b4), ...inspTypeCondLi(b4)];
+  const q4 = `
+    SELECT
+      DATE_TRUNC('month', d.CALENDAR_DATE) AS period,
+      COUNT(*) AS total_items,
+      SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items
+    FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+    ${inspTypeJoin('li')}
+    WHERE ${c4.join(' AND ')}
+    GROUP BY DATE_TRUNC('month', d.CALENDAR_DATE)
+    ORDER BY period
+  `;
+
+  // Q5: Days since last inspection — NO date range filter (shows all-time per job)
+  const b5 = [config.company_filter];
+  const c5 = [`j.JOB_COMPANY_NAME = :1`, ...jobConds('j', b5), ...inspTypeCond('fc', b5)];
+  const q5 = `
+    SELECT
+      j.JOB_NUMBER, j.JOB_NAME,
+      MAX(d.CALENDAR_DATE) AS last_inspection,
+      DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) AS days_since
+    FROM ${prefix}.FACT_CHECKPOINT fc
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = fc.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = fc.CHECKPOINT_PERFORMED_DATE_KEY
+    WHERE ${c5.join(' AND ')}
+    GROUP BY j.JOB_NUMBER, j.JOB_NAME
+    ORDER BY days_since DESC
+    LIMIT 20
+  `;
+
+  // Q6: Deficiency % by Area — top 10
+  const b6 = [config.company_filter];
+  const c6 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b6), ...jobConds('j', b6), ...inspTypeCondLi(b6)];
+  const q6 = `
+    SELECT
+      li.CHECKPOINT_ITEM_AREA_LABEL AS area,
+      COUNT(*) AS total_items,
+      SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items
+    FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+    ${inspTypeJoin('li')}
+    WHERE ${c6.join(' AND ')}
+    GROUP BY li.CHECKPOINT_ITEM_AREA_LABEL
+    HAVING SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) > 0
+    ORDER BY (SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END)::FLOAT / NULLIF(COUNT(*), 0)) DESC
+    LIMIT 10
+  `;
+
+  // Q7: Deficiency Detail — individual deficient line items
+  const b7 = [config.company_filter];
+  const c7 = [`j.JOB_COMPANY_NAME = :1`, `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
+    ...dateFilter('d.CALENDAR_DATE', filters, b7), ...jobConds('j', b7), ...inspTypeCondLi(b7)];
+  const q7 = `
     SELECT
       li.CHECKPOINT_ID,
-      d2.CALENDAR_DATE AS PERFORMED_DATE,
-      li.CHECKPOINT_DEFICIENT_ITEM_CLOSED_TIMESTAMP,
-      li.CHECKPOINT_ITEM_LABEL,
-      li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT,
-      li.CHECKPOINT_DEFICIENT_ITEM_NOTES_TEXT
+      li.CHECKPOINT_ITEM_AREA_LABEL AS area,
+      li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT AS result_notes,
+      j.JOB_KEY, j.JOB_NUMBER
     FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
-    JOIN ${prefix}.DIM_DATE d2 ON d2.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
-    WHERE ${lineConditions.join(' AND ')}
-    ORDER BY d2.CALENDAR_DATE DESC
-    LIMIT 2000
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+    ${inspTypeJoin('li')}
+    WHERE ${c7.join(' AND ')}
+    ORDER BY d.CALENDAR_DATE DESC
+    LIMIT 5000
   `;
 
-  const [headers, lineItems] = await Promise.all([
-    connector.queryView(headerSql, binds),
-    connector.queryView(lineSql, binds2),
+  // Q8+Q9: Filter dropdown values (VP, Manager, Inspection Types)
+  const b8 = [config.company_filter];
+  const q8 = `
+    SELECT DISTINCT j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp, j.JOB_TIER_03_CURRENT_VALUE_LABEL AS manager
+    FROM ${prefix}.FACT_CHECKPOINT fc
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = fc.JOB_KEY
+    WHERE j.JOB_COMPANY_NAME = :1
+  `;
+  const b9 = [config.company_filter];
+  const q9 = `
+    SELECT DISTINCT fc.CHECKPOINT_TEMPLATE_DESCRIPTION AS inspection_type
+    FROM ${prefix}.FACT_CHECKPOINT fc
+    JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = fc.JOB_KEY
+    WHERE j.JOB_COMPANY_NAME = :1
+    ORDER BY fc.CHECKPOINT_TEMPLATE_DESCRIPTION
+  `;
+
+  const [r1, r2, r3, r4, r5, r6, r7, r8, r9] = await Promise.all([
+    connector.queryView(q1, b1),
+    connector.queryView(q2, b2),
+    connector.queryView(q3, b3),
+    connector.queryView(q4, b4),
+    connector.queryView(q5, b5),
+    connector.queryView(q6, b6),
+    connector.queryView(q7, b7),
+    connector.queryView(q8, b8),
+    connector.queryView(q9, b9),
   ]);
 
-  // KPI calculations
-  const inspectionCount = headers.length;
-  const touchpointCount = headers.reduce((sum, r) => sum + (Number(r.checkpoint_evaluated_item_quantity) || 0), 0);
-  const deficiencyCount = headers.reduce((sum, r) => sum + (Number(r.checkpoint_deficient_item_quantity) || 0), 0);
-  const deficiencyPct = touchpointCount > 0 ? ((deficiencyCount / touchpointCount) * 100).toFixed(1) : '0.0';
-
-  // Jobs for filter
-  const jobsSet = new Map();
-  for (const r of headers) {
-    if (r.job_number && !jobsSet.has(r.job_number)) {
-      jobsSet.set(r.job_number, { id: r.job_number, job_name: r.job_name });
-    }
-  }
-
-  // Inspection types for filter
-  const inspectionTypes = [...new Set(headers.map(r => r.checkpoint_template_type_label).filter(Boolean))].sort();
+  // KPIs
+  const inspectionCount = Number(r1[0]?.cnt) || 0;
+  const totalItems = r2.reduce((sum, r) => sum + Number(r.total_items), 0);
+  const deficientItems = r2.reduce((sum, r) => sum + Number(r.deficient_items), 0);
+  const deficientPct = totalItems > 0 ? parseFloat(((deficientItems / totalItems) * 100).toFixed(2)) : 0;
 
   return {
     kpis: {
-      inspection_count: inspectionCount,
-      touchpoint_count: touchpointCount,
-      deficiency_count: deficiencyCount,
-      deficiency_pct: parseFloat(deficiencyPct),
+      inspections: inspectionCount,
+      items: totalItems,
+      items_deficient_pct: deficientPct,
     },
-    inspections: headers.map(r => ({
-      id: r.checkpoint_id,
-      checkpoint_key: r.checkpoint_key,
+    weeklyTrend: r3.map(r => ({
+      period: r.period,
+      pct: Number(r.total_items) > 0 ? parseFloat(((Number(r.deficient_items) / Number(r.total_items)) * 100).toFixed(2)) : 0,
+    })),
+    monthlyTrend: r4.map(r => ({
+      period: r.period,
+      pct: Number(r.total_items) > 0 ? parseFloat(((Number(r.deficient_items) / Number(r.total_items)) * 100).toFixed(2)) : 0,
+    })),
+    daysSince: r5.map(r => ({
       job_number: r.job_number,
       job_name: r.job_name,
-      date: r.performed_date,
-      score_pct: r.checkpoint_score_percent != null ? Number(r.checkpoint_score_percent) : null,
-      type: r.checkpoint_template_type_label,
+      days: Number(r.days_since) || 0,
     })),
-    deficiencies: lineItems.map(r => ({
+    deficiencyByArea: r6.map(r => ({
+      area: r.area || 'Unknown',
+      pct: Number(r.total_items) > 0 ? parseFloat(((Number(r.deficient_items) / Number(r.total_items)) * 100).toFixed(2)) : 0,
+    })),
+    jobDetail: r2.map(r => ({
+      job_key: r.job_key,
+      job_number: r.job_number,
+      job_name: r.job_name,
+      total_items: Number(r.total_items),
+      items_deficient: Number(r.deficient_items),
+      pct_deficient: Number(r.total_items) > 0 ? parseFloat(((Number(r.deficient_items) / Number(r.total_items)) * 100).toFixed(1)) : 0,
+    })),
+    deficiencyDetail: r7.map(r => ({
       checkpoint_id: r.checkpoint_id,
-      added_date: r.performed_date,
-      closed_date: r.checkpoint_deficient_item_closed_timestamp,
-      item_description: r.checkpoint_item_label,
-      deficiency_notes: r.checkpoint_item_deficiency_detail_text,
-      closed_notes: r.checkpoint_deficient_item_notes_text,
+      area: r.area || '',
+      result_notes: r.result_notes || '',
+      job_key: r.job_key,
+      job_number: r.job_number,
     })),
-    jobs: Array.from(jobsSet.values()),
-    inspectionTypes,
+    filters: {
+      vpValues: [...new Set(r8.map(r => r.vp).filter(Boolean))].sort(),
+      managerValues: [...new Set(r8.map(r => r.manager).filter(Boolean))].sort(),
+      inspectionTypes: r9.map(r => r.inspection_type).filter(Boolean),
+    },
   };
 }
 
