@@ -500,10 +500,23 @@ router.post('/', rateLimit, async (req, res) => {
         ? lastUserMessage.content
         : lastUserMessage?.content?.[0]?.text || '';
 
-      const knowledgeCtx = await getKnowledgeContext(req.supabase, effectiveTenantId, agent_key, userQuery);
-      if (knowledgeCtx) {
-        enrichedSystem = enrichedSystem + knowledgeCtx;
-        console.log(`[claude] Injected knowledge for ${agent_key} — ${knowledgeCtx.length} chars`);
+      // Analytics agent uses Snowflake queries + dashboard context — skip heavy knowledge docs
+      const skipKnowledge = agent_key === 'analytics';
+      if (!skipKnowledge) {
+        const knowledgeCtx = await getKnowledgeContext(req.supabase, effectiveTenantId, agent_key, userQuery);
+        if (knowledgeCtx) {
+          enrichedSystem = enrichedSystem + knowledgeCtx;
+          console.log(`[claude] Injected knowledge for ${agent_key} — ${knowledgeCtx.length} chars`);
+        }
+      } else {
+        // Still need to load agent row for inject_operational_context flag
+        const { data: agentRow } = await req.supabase
+          .from('tenant_agents')
+          .select('knowledge_scopes, inject_operational_context')
+          .eq('tenant_id', effectiveTenantId)
+          .eq('agent_key', agent_key)
+          .maybeSingle();
+        getKnowledgeContext._lastAgent = agentRow;
       }
 
       // Inject operational data for agents with inject_operational_context flag
@@ -572,6 +585,13 @@ router.post('/', rateLimit, async (req, res) => {
 
     const tools = snowflakeDirect && sfConfig ? [SNOWFLAKE_QUERY_TOOL] : [];
     let sfConnector = null;
+
+    // Safety cap: truncate enriched system prompt if too large (~150K chars ≈ 40K tokens)
+    const MAX_SYSTEM_CHARS = 150000;
+    if (enrichedSystem.length > MAX_SYSTEM_CHARS) {
+      console.warn(`[claude] System prompt too large (${enrichedSystem.length} chars), truncating to ${MAX_SYSTEM_CHARS}`);
+      enrichedSystem = enrichedSystem.slice(0, MAX_SYSTEM_CHARS) + '\n\n[Context truncated due to size limits]';
+    }
 
     try {
       let apiMessages = [...messages];
