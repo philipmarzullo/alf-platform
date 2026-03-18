@@ -517,6 +517,18 @@ router.post('/', rateLimit, async (req, res) => {
           .eq('agent_key', agent_key)
           .maybeSingle();
         getKnowledgeContext._lastAgent = agentRow;
+
+        // Load cached schema profile for analytics agent
+        const { data: profileRow } = await req.supabase
+          .from('tenant_schema_profiles')
+          .select('profile_text')
+          .eq('tenant_id', effectiveTenantId)
+          .maybeSingle();
+
+        if (profileRow?.profile_text) {
+          enrichedSystem += '\n\n' + profileRow.profile_text;
+          console.log(`[claude] Injected schema profile — ${profileRow.profile_text.length} chars`);
+        }
       }
 
       // Inject operational data for agents with inject_operational_context flag

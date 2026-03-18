@@ -34,6 +34,7 @@ import embeddingsRouter from './routes/embeddings.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import qbrTemplatesRouter from './routes/qbrTemplates.js';
 import unionBenefitsRouter from './routes/unionBenefits.js';
+import schemaProfileRouter, { handleSchemaProfileRefresh } from './routes/schemaProfile.js';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -91,6 +92,7 @@ app.use('/api/oauth', oauthRouter);
 app.post('/api/backup/cron/daily-export', handleScheduledExport);
 app.post('/api/workflows/cron/execute', handleScheduledWorkflows);
 app.post('/api/workflows/cron/metric-triggers', handleMetricTriggers);
+app.post('/api/schema-profile/cron/refresh', handleSchemaProfileRefresh);
 
 // --- Public API routes (no auth) ---
 app.use('/api/demo-request', demoRequestRouter);
@@ -124,6 +126,7 @@ app.use('/api/embeddings', auth, embeddingsRouter);
 app.use('/api/workflow-runs', auth, workflowRunsRouter);
 app.use('/api/qbr-templates', auth, qbrTemplatesRouter);
 app.use('/api/union-benefits', auth, unionBenefitsRouter);
+app.use('/api/schema-profile', auth, schemaProfileRouter);
 
 // --- 404 ---
 app.use((req, res) => {
