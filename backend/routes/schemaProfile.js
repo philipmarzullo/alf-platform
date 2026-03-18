@@ -40,7 +40,7 @@ export async function handleSchemaProfileRefresh(req, res) {
     // Fetch all active tenants with snowflake_direct enabled
     const { data: tenants, error } = await sb
       .from('alf_tenants')
-      .select('id, name')
+      .select('id, company_name')
       .eq('snowflake_direct', true)
       .eq('is_active', true);
 
@@ -55,11 +55,11 @@ export async function handleSchemaProfileRefresh(req, res) {
     for (const tenant of tenants) {
       try {
         const stats = await runSchemaProfile(sb, tenant.id);
-        results.push({ tenant_id: tenant.id, name: tenant.name, status: 'ok', ...stats });
-        console.log(`[schema-profile-cron] ${tenant.name}: ${stats.char_count} chars`);
+        results.push({ tenant_id: tenant.id, name: tenant.company_name, status: 'ok', ...stats });
+        console.log(`[schema-profile-cron] ${tenant.company_name}: ${stats.char_count} chars`);
       } catch (err) {
-        results.push({ tenant_id: tenant.id, name: tenant.name, status: 'error', error: err.message });
-        console.error(`[schema-profile-cron] ${tenant.name} failed:`, err.message);
+        results.push({ tenant_id: tenant.id, name: tenant.company_name, status: 'error', error: err.message });
+        console.error(`[schema-profile-cron] ${tenant.company_name} failed:`, err.message);
       }
     }
 
