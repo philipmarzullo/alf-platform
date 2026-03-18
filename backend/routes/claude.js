@@ -565,7 +565,7 @@ router.post('/', rateLimit, async (req, res) => {
           .select('credentials')
           .eq('service_type', 'snowflake')
           .single();
-        if (cred) sfConfig._credentials = cred.credentials;
+        if (cred && sfConfig) sfConfig._credentials = cred.credentials;
       }
     }
 
@@ -799,8 +799,8 @@ router.post('/', rateLimit, async (req, res) => {
       }
     }
   } catch (err) {
-    console.error('[claude] Proxy error:', err.message);
-    res.status(502).json({ error: 'Failed to reach AI service' });
+    console.error('[claude] Proxy error:', err.message, err.stack);
+    res.status(502).json({ error: `Failed to reach AI service: ${err.message}` });
   }
 });
 
