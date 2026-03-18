@@ -243,7 +243,7 @@ async function queryInspections(supabase, tenantId, filters) {
   const c6 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b6), ...jobConds('j', b6), ...inspTypeCondLi(b6)];
   const q6 = `
     SELECT
-      li.CHECKPOINT_ITEM_AREA_LABEL AS area,
+      li.CHECKPOINT_AREA_LABEL AS area,
       COUNT(*) AS total_items,
       SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items
     FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
@@ -251,7 +251,7 @@ async function queryInspections(supabase, tenantId, filters) {
     JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     ${inspTypeJoin('li')}
     WHERE ${c6.join(' AND ')}
-    GROUP BY li.CHECKPOINT_ITEM_AREA_LABEL
+    GROUP BY li.CHECKPOINT_AREA_LABEL
     HAVING SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) > 0
     ORDER BY (SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END)::FLOAT / NULLIF(COUNT(*), 0)) DESC
     LIMIT 10
@@ -264,7 +264,7 @@ async function queryInspections(supabase, tenantId, filters) {
   const q7 = `
     SELECT
       li.CHECKPOINT_ID,
-      li.CHECKPOINT_ITEM_AREA_LABEL AS area,
+      li.CHECKPOINT_AREA_LABEL AS area,
       li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT AS result_notes,
       j.JOB_KEY, j.JOB_NUMBER
     FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li

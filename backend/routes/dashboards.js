@@ -2056,6 +2056,14 @@ router.get('/:tenantId/:domain', async (req, res) => {
     dateFrom: req.query.dateFrom || null,
     dateTo: req.query.dateTo || null,
     jobIds: effectiveJobIds,
+    // Snowflake domain filter params (included in cache key for all domains)
+    itemType: req.query.itemType || null,
+    inspectionType: req.query.inspectionType || null,
+    ticketType: req.query.ticketType || null,
+    vp: req.query.vp || null,
+    manager: req.query.manager || null,
+    jobName: req.query.jobName || null,
+    jobNumber: req.query.jobNumber || null,
   };
 
   const userId = scopedJobIds ? req.user.id : null;
@@ -2125,17 +2133,7 @@ router.get('/:tenantId/:domain', async (req, res) => {
 
     // ─── Snowflake-direct QBU domains ───
     if (SNOWFLAKE_DOMAINS.has(domain)) {
-      const sfFilters = {
-        ...filters,
-        itemType: req.query.itemType || null,
-        inspectionType: req.query.inspectionType || null,
-        ticketType: req.query.ticketType || null,
-        vp: req.query.vp || null,
-        manager: req.query.manager || null,
-        jobName: req.query.jobName || null,
-        jobNumber: req.query.jobNumber || null,
-      };
-      const data = await getSnowflakeDomainData(req.supabase, effectiveTenantId, domain, sfFilters);
+      const data = await getSnowflakeDomainData(req.supabase, effectiveTenantId, domain, filters);
       setCache(key, data);
       return res.json(data);
     }
