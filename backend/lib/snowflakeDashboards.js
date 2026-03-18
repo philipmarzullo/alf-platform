@@ -4,9 +4,13 @@
  * These run live against Wavelytics views (not synced sf_* tables).
  * Each function connects via SnowflakeConnector.queryView() and returns
  * formatted data matching what the frontend dashboard components expect.
+ *
+ * NOTE: All *_DATE_KEY columns are surrogate MD5 hashes, NOT date strings.
+ * We join DIM_DATE to resolve actual CALENDAR_DATE values for filtering/display.
  */
 
 import SnowflakeConnector from '../sync/connectors/SnowflakeConnector.js';
+import { getPlatformApiKey } from '../routes/platformCredentials.js';
 
 // ── Lazy singleton connector per tenant ──
 const connectors = new Map();
@@ -23,15 +27,12 @@ async function getConnector(supabase, tenantId) {
 
   if (!sc?.config) throw new Error('Snowflake not configured for this tenant');
 
-  const { data: cred } = await supabase
-    .from('alf_platform_credentials')
-    .select('credentials')
-    .eq('service_type', 'snowflake')
-    .single();
+  // Decrypt platform Snowflake credentials (same path as sync runner)
+  const credJson = await getPlatformApiKey(supabase, 'snowflake');
+  if (!credJson) throw new Error('Snowflake platform credentials missing');
+  const credentials = typeof credJson === 'string' ? JSON.parse(credJson) : credJson;
 
-  if (!cred?.credentials) throw new Error('Snowflake platform credentials missing');
-
-  const connector = new SnowflakeConnector(tenantId, sc.config, cred.credentials);
+  const connector = new SnowflakeConnector(tenantId, sc.config, credentials);
   await connector.connect();
   connectors.set(tenantId, { connector, config: sc.config });
   return { connector, config: sc.config };
@@ -41,22 +42,22 @@ function fq(config) {
   return `${config.tenant_database}.${config.schema || 'PUBLIC'}`;
 }
 
-function dateFilter(col, filters, binds) {
+// Filter on a resolved CALENDAR_DATE column (from a DIM_DATE join alias)
+function dateFilter(calendarDateCol, filters, binds) {
   const parts = [];
   if (filters.dateFrom) {
     binds.push(filters.dateFrom);
-    parts.push(`${col} >= :${binds.length}`);
+    parts.push(`${calendarDateCol} >= :${binds.length}`);
   }
   if (filters.dateTo) {
     binds.push(filters.dateTo);
-    parts.push(`${col} <= :${binds.length}`);
+    parts.push(`${calendarDateCol} <= :${binds.length}`);
   }
   return parts;
 }
 
 function jobFilter(col, filters, binds) {
   if (!filters.jobIds?.length) return [];
-  // Use IN with explicit values (Snowflake bind doesn't support arrays well)
   const placeholders = filters.jobIds.map(id => {
     binds.push(id);
     return `:${binds.length}`;
@@ -76,7 +77,7 @@ async function queryActionItems(supabase, tenantId, filters) {
     `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
   ];
 
-  conditions.push(...dateFilter('li.CHECKPOINT_PERFORMED_DATE_KEY', filters, binds));
+  conditions.push(...dateFilter('d.CALENDAR_DATE', filters, binds));
   conditions.push(...jobFilter('li.JOB_KEY', filters, binds));
   if (filters.itemType) {
     binds.push(filters.itemType);
@@ -87,7 +88,7 @@ async function queryActionItems(supabase, tenantId, filters) {
     SELECT
       li.CHECKPOINT_ID,
       li.CHECKPOINT_ITEM_LABEL,
-      li.CHECKPOINT_PERFORMED_DATE_KEY,
+      d.CALENDAR_DATE AS PERFORMED_DATE,
       li.IS_CHECKPOINT_ITEM_DEFICIENCY_OPEN_FLAG,
       li.IS_CHECKPOINT_ITEM_DEFICIENCY_CLOSED_FLAG,
       li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT,
@@ -97,8 +98,9 @@ async function queryActionItems(supabase, tenantId, filters) {
       j.JOB_NAME
     FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     WHERE ${conditions.join(' AND ')}
-    ORDER BY li.CHECKPOINT_PERFORMED_DATE_KEY DESC
+    ORDER BY d.CALENDAR_DATE DESC
     LIMIT 2000
   `;
 
@@ -119,7 +121,7 @@ async function queryActionItems(supabase, tenantId, filters) {
     items: rows.map(r => ({
       action_item_id: r.checkpoint_id,
       description: r.checkpoint_item_label,
-      comment_date: r.checkpoint_performed_date_key,
+      comment_date: r.performed_date,
       status: r.is_checkpoint_item_deficiency_open_flag === 1 ? 'Open' : 'Closed',
       comment: r.checkpoint_item_deficiency_detail_text,
       item_type: r.checkpoint_item_type_label,
@@ -142,19 +144,19 @@ async function queryInspections(supabase, tenantId, filters) {
   const headerConditions = [
     `c.JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
   ];
-  headerConditions.push(...dateFilter('c.CHECKPOINT_PERFORMED_DATE_KEY', filters, binds));
+  headerConditions.push(...dateFilter('d.CALENDAR_DATE', filters, binds));
   headerConditions.push(...jobFilter('c.JOB_KEY', filters, binds));
   if (filters.inspectionType) {
     binds.push(filters.inspectionType);
     headerConditions.push(`c.CHECKPOINT_TEMPLATE_TYPE_LABEL = :${binds.length}`);
   }
 
-  // Query 1: Inspection headers
+  // Query 1: Inspection headers — join DIM_DATE for performed date
   const headerSql = `
     SELECT
       c.CHECKPOINT_ID,
       c.CHECKPOINT_KEY,
-      c.CHECKPOINT_PERFORMED_DATE_KEY,
+      d.CALENDAR_DATE AS PERFORMED_DATE,
       c.CHECKPOINT_SCORE_PERCENT,
       c.CHECKPOINT_EVALUATED_ITEM_QUANTITY,
       c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY,
@@ -164,31 +166,33 @@ async function queryInspections(supabase, tenantId, filters) {
       j.JOB_NAME
     FROM ${prefix}.FACT_CHECKPOINT c
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = c.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = c.CHECKPOINT_PERFORMED_DATE_KEY
     WHERE ${headerConditions.join(' AND ')}
-    ORDER BY c.CHECKPOINT_PERFORMED_DATE_KEY DESC
+    ORDER BY d.CALENDAR_DATE DESC
     LIMIT 2000
   `;
 
-  // Query 2: Deficiency line items (separate query to avoid cartesian)
+  // Query 2: Deficiency line items — join DIM_DATE for performed date
   const binds2 = [config.company_filter];
   const lineConditions = [
     `li.JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
     `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
   ];
-  lineConditions.push(...dateFilter('li.CHECKPOINT_PERFORMED_DATE_KEY', filters, binds2));
+  lineConditions.push(...dateFilter('d2.CALENDAR_DATE', filters, binds2));
   lineConditions.push(...jobFilter('li.JOB_KEY', filters, binds2));
 
   const lineSql = `
     SELECT
       li.CHECKPOINT_ID,
-      li.CHECKPOINT_PERFORMED_DATE_KEY,
+      d2.CALENDAR_DATE AS PERFORMED_DATE,
       li.CHECKPOINT_DEFICIENT_ITEM_CLOSED_TIMESTAMP,
       li.CHECKPOINT_ITEM_LABEL,
       li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT,
       li.CHECKPOINT_DEFICIENT_ITEM_NOTES_TEXT
     FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+    JOIN ${prefix}.DIM_DATE d2 ON d2.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     WHERE ${lineConditions.join(' AND ')}
-    ORDER BY li.CHECKPOINT_PERFORMED_DATE_KEY DESC
+    ORDER BY d2.CALENDAR_DATE DESC
     LIMIT 2000
   `;
 
@@ -226,13 +230,13 @@ async function queryInspections(supabase, tenantId, filters) {
       checkpoint_key: r.checkpoint_key,
       job_number: r.job_number,
       job_name: r.job_name,
-      date: r.checkpoint_performed_date_key,
+      date: r.performed_date,
       score_pct: r.checkpoint_score_percent != null ? Number(r.checkpoint_score_percent) : null,
       type: r.checkpoint_template_type_label,
     })),
     deficiencies: lineItems.map(r => ({
       checkpoint_id: r.checkpoint_id,
-      added_date: r.checkpoint_performed_date_key,
+      added_date: r.performed_date,
       closed_date: r.checkpoint_deficient_item_closed_timestamp,
       item_description: r.checkpoint_item_label,
       deficiency_notes: r.checkpoint_item_deficiency_detail_text,
@@ -253,19 +257,19 @@ async function queryTurnover(supabase, tenantId, filters) {
   const conditions = [
     `w.PRIMARY_JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
   ];
-  conditions.push(...dateFilter('w.DATE_KEY', filters, binds));
+  conditions.push(...dateFilter('d.CALENDAR_DATE', filters, binds));
   conditions.push(...jobFilter('w.PRIMARY_JOB_KEY', filters, binds));
 
-  // Monthly aggregation: terminations + active headcount per month
+  // Monthly aggregation via DIM_DATE.CALENDAR_DATE for real date grouping
   const sql = `
     SELECT
-      SUBSTR(w.DATE_KEY, 1, 7) AS month,
+      TO_CHAR(d.CALENDAR_DATE, 'YYYY-MM') AS month,
       COUNT(DISTINCT CASE WHEN w.IS_TERMINATION_INCLUDED_IN_TURNOVER_FLAG = 1 THEN w.EMPLOYEE_KEY END) AS termed,
-      COUNT(DISTINCT CASE WHEN w.IS_ACTIVE_FLAG = 1 THEN w.EMPLOYEE_KEY END) AS active_employees,
-      COUNT(DISTINCT w.DATE_KEY) AS days_in_month
+      COUNT(DISTINCT CASE WHEN w.IS_ACTIVE_FLAG = 1 THEN w.EMPLOYEE_KEY END) AS active_employees
     FROM ${prefix}.FACT_EMPLOYEE_WORKFORCE_DAILY w
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = w.DATE_KEY
     WHERE ${conditions.join(' AND ')}
-    GROUP BY SUBSTR(w.DATE_KEY, 1, 7)
+    GROUP BY TO_CHAR(d.CALENDAR_DATE, 'YYYY-MM')
     ORDER BY month
   `;
 
@@ -295,12 +299,13 @@ async function queryTurnover(supabase, tenantId, filters) {
   const jobConditions = [
     `w.PRIMARY_JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
   ];
-  jobConditions.push(...dateFilter('w.DATE_KEY', filters, binds2));
+  jobConditions.push(...dateFilter('d.CALENDAR_DATE', filters, binds2));
 
   const jobSql = `
     SELECT DISTINCT j.JOB_NUMBER, j.JOB_NAME
     FROM ${prefix}.FACT_EMPLOYEE_WORKFORCE_DAILY w
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = w.PRIMARY_JOB_KEY
+    JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = w.DATE_KEY
     WHERE ${jobConditions.join(' AND ')}
     ORDER BY j.JOB_NAME
     LIMIT 500
@@ -327,18 +332,19 @@ async function queryWorkTicketsQBU(supabase, tenantId, filters) {
   const conditions = [
     `t.JOB_KEY IN (SELECT JOB_KEY FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`,
   ];
-  conditions.push(...dateFilter('t.WORK_TICKET_SCHEDULED_DATE_KEY', filters, binds));
+  conditions.push(...dateFilter('ds.CALENDAR_DATE', filters, binds));
   conditions.push(...jobFilter('t.JOB_KEY', filters, binds));
   if (filters.ticketType) {
     binds.push(filters.ticketType);
     conditions.push(`t.WORK_SCHEDULE_TYPE_LABEL = :${binds.length}`);
   }
 
+  // Two DIM_DATE joins: ds for scheduled date, dc for completed date
   const sql = `
     SELECT
       t.WORK_TICKET_NUMBER,
-      t.WORK_TICKET_SCHEDULED_DATE_KEY,
-      t.WORK_TICKET_COMPLETED_DATE_KEY,
+      ds.CALENDAR_DATE AS SCHEDULE_DATE,
+      dc.CALENDAR_DATE AS COMPLETION_DATE,
       t.WORK_SCHEDULE_TYPE_LABEL,
       t.WORK_TICKET_COMPLETION_NOTES,
       t.IS_WORK_TICKET_COMPLETED_FLAG,
@@ -350,9 +356,11 @@ async function queryWorkTicketsQBU(supabase, tenantId, filters) {
       tk.WORK_SCHEDULE_TASK_NAME
     FROM ${prefix}.FACT_WORK_SCHEDULE_TICKET t
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = t.JOB_KEY
+    JOIN ${prefix}.DIM_DATE ds ON ds.DATE_KEY = t.WORK_TICKET_SCHEDULED_DATE_KEY
+    LEFT JOIN ${prefix}.DIM_DATE dc ON dc.DATE_KEY = t.WORK_TICKET_COMPLETED_DATE_KEY
     LEFT JOIN ${prefix}.DIM_WORK_SCHEDULE_TASK tk ON tk.WORK_SCHEDULE_TASK_KEY = t.WORK_SCHEDULE_TASK_KEY
     WHERE ${conditions.join(' AND ')}
-    ORDER BY t.WORK_TICKET_SCHEDULED_DATE_KEY DESC
+    ORDER BY ds.CALENDAR_DATE DESC
     LIMIT 2000
   `;
 
@@ -364,7 +372,7 @@ async function queryWorkTicketsQBU(supabase, tenantId, filters) {
   for (const r of rows) {
     const ticket = {
       ticket_number: r.work_ticket_number,
-      schedule_date: r.work_ticket_scheduled_date_key,
+      schedule_date: r.schedule_date,
       address: r.job_address_line_1,
       city: r.job_city,
       state: r.job_state_code,
@@ -375,7 +383,7 @@ async function queryWorkTicketsQBU(supabase, tenantId, filters) {
     };
 
     if (r.is_work_ticket_completed_flag === 1) {
-      ticket.completion_date = r.work_ticket_completed_date_key;
+      ticket.completion_date = r.completion_date;
       completed.push(ticket);
     } else {
       upcoming.push(ticket);
