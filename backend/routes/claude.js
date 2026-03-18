@@ -5,6 +5,7 @@ import { extractMemories } from './memory.js';
 import { semanticSearch, hasEmbeddings } from '../lib/semanticSearch.js';
 import { SNOWFLAKE_QUERY_TOOL, executeSnowflakeQuery } from '../lib/snowflakeQueryTool.js';
 import SnowflakeConnector from '../sync/connectors/SnowflakeConnector.js';
+import { getPlatformApiKey } from './platformCredentials.js';
 
 const router = Router();
 
@@ -560,12 +561,12 @@ router.post('/', rateLimit, async (req, res) => {
           .single();
         sfConfig = sc?.config;
 
-        const { data: cred } = await req.supabase
-          .from('alf_platform_credentials')
-          .select('credentials')
-          .eq('service_type', 'snowflake')
-          .single();
-        if (cred && sfConfig) sfConfig._credentials = cred.credentials;
+        if (sfConfig) {
+          const credJson = await getPlatformApiKey(req.supabase, 'snowflake');
+          if (credJson) {
+            sfConfig._credentials = typeof credJson === 'string' ? JSON.parse(credJson) : credJson;
+          }
+        }
       }
     }
 
