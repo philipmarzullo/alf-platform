@@ -148,6 +148,11 @@ function buildSafeQuery(input, config) {
       if (!SAFE_COL.test(col)) throw new Error(`Invalid filter column: ${key}`);
 
       if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        // LIKE filter: { like: "%pattern%" }
+        if (value.like !== undefined) {
+          binds.push(value.like);
+          conditions.push(`${col} ILIKE :${binds.length}`);
+        }
         // Range filter: { gte, lte }
         if (value.gte !== undefined) {
           binds.push(value.gte);
@@ -172,6 +177,85 @@ function buildSafeQuery(input, config) {
   return { sqlText, binds, limit };
 }
 
+// ── Table reference regex — extracts table names from SQL ──
+const TABLE_REF_RE = /\b(?:FROM|JOIN)\s+(?:[A-Z0-9_]+\.[A-Z0-9_]+\.)?([A-Z_][A-Z0-9_]*)\b/gi;
+
+/**
+ * Execute a raw SQL SELECT query with tenant isolation.
+ * Validates all table references against ALLOWED_VIEWS, injects company filter
+ * via a CTE wrapping DIM_JOB, and enforces a LIMIT.
+ */
+function buildRawSqlQuery(sql, config) {
+  const trimmed = sql.trim().replace(/;+\s*$/, '');
+
+  // Block non-SELECT statements
+  if (!/^\s*SELECT\b/i.test(trimmed) && !/^\s*WITH\b/i.test(trimmed)) {
+    throw new Error('Only SELECT statements are allowed');
+  }
+
+  // Block dangerous keywords
+  const blocked = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|MERGE|GRANT|REVOKE|EXEC|EXECUTE|CALL)\b/i;
+  if (blocked.test(trimmed)) {
+    throw new Error('Only SELECT statements are allowed');
+  }
+
+  // Extract and validate table references
+  const tables = new Set();
+  let match;
+  const re = new RegExp(TABLE_REF_RE.source, 'gi');
+  while ((match = re.exec(trimmed)) !== null) {
+    tables.add(match[1].toUpperCase());
+  }
+
+  // Remove common false positives (CTE names, aliases)
+  // We only block if a real table name doesn't match ALLOWED_VIEWS
+  const invalidTables = [...tables].filter(t => !ALLOWED_VIEWS.has(t));
+  if (invalidTables.length > 0) {
+    throw new Error(`Tables not in allowed list: ${invalidTables.join(', ')}`);
+  }
+
+  if (tables.size === 0) {
+    throw new Error('No valid table references found in SQL');
+  }
+
+  const db = config.tenant_database;
+  const schema = config.schema || 'PUBLIC';
+  const fq = `${db}.${schema}`;
+  const companyFilter = config.company_filter;
+
+  // Fully qualify bare table names
+  let qualifiedSql = trimmed;
+  for (const table of tables) {
+    // Replace bare table name with fully qualified, but not if already qualified
+    const bareRe = new RegExp(`(?<!\\.)\\b(${table})\\b(?!\\s*\\.)`, 'gi');
+    qualifiedSql = qualifiedSql.replace(bareRe, `${fq}.${table}`);
+  }
+
+  // Inject company filter as CTE wrapping DIM_JOB
+  const binds = [companyFilter];
+  const cte = `WITH _tenant_jobs AS (SELECT * FROM ${fq}.DIM_JOB WHERE JOB_COMPANY_NAME = :1)`;
+
+  // Replace DIM_JOB references with _tenant_jobs CTE
+  qualifiedSql = qualifiedSql.replace(
+    new RegExp(`${db}\\.${schema}\\.DIM_JOB\\b`, 'gi'),
+    '_tenant_jobs'
+  );
+
+  // If user already has WITH clause, merge CTEs
+  if (/^\s*WITH\b/i.test(qualifiedSql)) {
+    qualifiedSql = qualifiedSql.replace(/^\s*WITH\b/i, `${cte},\n`);
+  } else {
+    qualifiedSql = `${cte}\n${qualifiedSql}`;
+  }
+
+  // Inject LIMIT if not present
+  if (!/\bLIMIT\s+\d+/i.test(qualifiedSql)) {
+    qualifiedSql += ' LIMIT 2000';
+  }
+
+  return { sqlText: qualifiedSql, binds };
+}
+
 /**
  * Execute a Snowflake query tool call from Claude.
  */
@@ -193,7 +277,18 @@ async function executeSnowflakeQuery(input, connector, config) {
     };
   }
 
-  // Query mode
+  // Raw SQL mode
+  if (input.sql) {
+    const { sqlText, binds } = buildRawSqlQuery(input.sql, config);
+    const rows = await connector.queryView(sqlText, binds);
+    return {
+      rows,
+      row_count: rows.length,
+      truncated: rows.length >= 2000,
+    };
+  }
+
+  // Structured query mode
   const { sqlText, binds, limit } = buildSafeQuery(input, config);
   const rows = await connector.queryView(sqlText, binds);
 
@@ -208,24 +303,37 @@ async function executeSnowflakeQuery(input, connector, config) {
 const SNOWFLAKE_QUERY_TOOL = {
   name: 'querySnowflake',
   description:
-    'Query Wavelytics WinTeam data warehouse views directly. Use this to answer questions about employees, jobs, timekeeping, labor budgets, GL entries, payroll, purchasing, and all other operational data. You can describe a view first to see its columns, then query it with filters.',
+    'Query Wavelytics data warehouse. Two modes:\n\n' +
+    '1. **Raw SQL** (preferred for JOINs, GROUP BY, subqueries): Pass a `sql` parameter with a SELECT statement. ' +
+    'All tables must be from the allowed view list. DIM_JOB is automatically filtered to the tenant\'s company. ' +
+    'Reference DIM_JOB in JOINs for tenant isolation on fact tables (via JOB_KEY). LIMIT 2000 auto-applied.\n\n' +
+    '2. **Structured query**: Pass `view_name` + `filters` for simple single-table lookups.\n\n' +
+    'Your system prompt includes a SCHEMA PROFILE with all view columns, data types, sample values, and Key Lookups (job names, VP codes). Use it to write precise queries.',
   input_schema: {
     type: 'object',
     properties: {
+      sql: {
+        type: 'string',
+        description:
+          'Raw SQL SELECT statement. Supports JOINs, GROUP BY, subqueries, CASE, window functions. ' +
+          'Use bare table names (e.g. DIM_JOB, FACT_TIMEKEEPING) — they are auto-qualified. ' +
+          'DIM_JOB is auto-filtered to the tenant\'s company. ' +
+          'Use ILIKE for partial string matching. Do NOT add company filters yourself.',
+      },
       view_name: {
         type: 'string',
         description:
-          'Name of the Wavelytics view to query (e.g. DIM_EMPLOYEE, FACT_TIMEKEEPING, DIM_JOB). Use DESCRIBE first if unsure of available columns.',
+          'Name of the view to query (structured mode). Use `sql` instead for JOINs or GROUP BY.',
       },
       columns: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Columns to SELECT. Omit to select all columns.',
+        description: 'Columns to SELECT (structured mode only).',
       },
       filters: {
         type: 'object',
         description:
-          'Filter conditions as key-value pairs. Values can be exact matches (string/number) or range objects like { "gte": "2024-01-01", "lte": "2024-12-31" }.',
+          'Filter conditions (structured mode). Values: exact match (string/number), range { "gte": ..., "lte": ... }, or pattern { "like": "%text%" } for ILIKE matching.',
         additionalProperties: true,
       },
       row_limit: {
@@ -237,7 +345,6 @@ const SNOWFLAKE_QUERY_TOOL = {
         description: 'Set to true to return column names and types instead of data.',
       },
     },
-    required: ['view_name'],
   },
 };
 

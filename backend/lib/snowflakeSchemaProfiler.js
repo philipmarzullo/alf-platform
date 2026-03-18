@@ -268,6 +268,31 @@ export async function runSchemaProfile(supabase, tenantId) {
     lines.push(`${view}: ${colParts.join(', ')}`);
   }
 
+  // Step 3b: Key Lookups — active job names and VP codes for name resolution
+  try {
+    const jobBinds = [companyFilter];
+    const jobSql = `SELECT JOB_NUMBER, JOB_NAME FROM ${fq}.DIM_JOB WHERE JOB_COMPANY_NAME = :1 AND IS_JOB_ACTIVE_FLAG = 1 ORDER BY JOB_NAME`;
+    const jobRows = await connector.queryView(jobSql, jobBinds);
+
+    if (jobRows.length > 0) {
+      lines.push('');
+      lines.push('## Key Lookups');
+      const jobList = jobRows.map(r => `${r.job_name}(${r.job_number})`).join(', ');
+      lines.push(`Active Jobs: ${jobList}`);
+    }
+
+    // VP codes from JOB_TIER_08
+    const vpSql = `SELECT DISTINCT JOB_TIER_08_CODE AS code FROM ${fq}.DIM_JOB WHERE JOB_COMPANY_NAME = :1 AND IS_JOB_ACTIVE_FLAG = 1 AND JOB_TIER_08_CODE IS NOT NULL ORDER BY code`;
+    const vpRows = await connector.queryView(vpSql, jobBinds);
+    if (vpRows.length > 0) {
+      lines.push(`VP Codes: ${vpRows.map(r => r.code).join(', ')}`);
+    }
+
+    console.log(`[schema-profiler] Key lookups: ${jobRows.length} jobs, ${vpRows.length} VP codes`);
+  } catch (err) {
+    console.warn(`[schema-profiler] Key lookups failed:`, err.message);
+  }
+
   const profileText = lines.join('\n');
 
   // Step 4: Upsert into tenant_schema_profiles

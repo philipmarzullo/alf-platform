@@ -611,7 +611,7 @@ router.post('/', rateLimit, async (req, res) => {
       let apiMessages = [...messages];
       let totalInput = 0, totalOutput = 0;
       let data;
-      const MAX_ROUNDS = 10;
+      const MAX_ROUNDS = 5;
 
       for (let round = 0; round < MAX_ROUNDS; round++) {
         const anthropicResponse = await fetch(ANTHROPIC_URL, {
