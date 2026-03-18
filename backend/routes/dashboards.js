@@ -1622,7 +1622,22 @@ router.get('/:tenantId/metric-catalog', async (req, res) => {
   }
 
   try {
-    const template = await getUserTemplate(req.supabase, req.user.id, effectiveTenantId, req.user.role);
+    // Admin impersonation: resolve catalog for a different user (View-as mode)
+    let userId = req.user.id;
+    let role = req.user.role;
+    if (req.query.effectiveUserId && ['admin', 'super-admin', 'platform_owner'].includes(req.user.role)) {
+      const { data: targetProfile } = await req.supabase
+        .from('profiles')
+        .select('id, role')
+        .eq('id', req.query.effectiveUserId)
+        .single();
+      if (targetProfile) {
+        userId = targetProfile.id;
+        role = targetProfile.role;
+      }
+    }
+
+    const template = await getUserTemplate(req.supabase, userId, effectiveTenantId, role);
     res.json({
       metricTier: template.metric_tier,
       allowedDomains: template.allowed_domains,
