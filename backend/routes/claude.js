@@ -651,13 +651,20 @@ router.post('/', rateLimit, async (req, res) => {
           console.log(`[claude] Snowflake connected for tenant ${effectiveTenantId}`);
         }
 
-        // Execute tool calls, build results
+        // Execute tool calls, build results (cap each result to prevent context blowup)
+        const MAX_TOOL_RESULT_CHARS = 15000;
         const toolResults = [];
         for (const block of data.content.filter(b => b.type === 'tool_use')) {
           console.log(`[claude] Tool call: ${block.name}(${JSON.stringify(block.input).slice(0, 200)})`);
           try {
             const result = await executeSnowflakeQuery(block.input, sfConnector, sfConfig);
-            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
+            let resultStr = JSON.stringify(result);
+            if (resultStr.length > MAX_TOOL_RESULT_CHARS) {
+              const rowCount = Array.isArray(result) ? result.length : (result?.rows?.length || '?');
+              resultStr = resultStr.slice(0, MAX_TOOL_RESULT_CHARS) + `\n\n[Result truncated — ${rowCount} total rows. Use filters or GROUP BY to narrow results.]`;
+              console.log(`[claude] Tool result truncated: ${resultStr.length} chars (was ${JSON.stringify(result).length})`);
+            }
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: resultStr });
           } catch (err) {
             console.warn(`[claude] Tool error: ${err.message}`);
             toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify({ error: err.message }), is_error: true });
