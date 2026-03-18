@@ -10,6 +10,6 @@ BEGIN
 
   INSERT INTO tenant_dashboard_domains (tenant_id, domain_key, name, description, icon, sort_order, is_active)
   VALUES
-    (tid, 'ops-kpi', 'QMS Ops KPI', 'Quality management scoring — VP and Manager summary', 'bar-chart-3', max_sort + 1, true)
+    (tid, 'ops-kpi-qms', 'QMS Ops KPI', 'Quality management scoring — VP and Manager summary', 'bar-chart-3', max_sort + 1, true)
   ON CONFLICT (tenant_id, domain_key) DO NOTHING;
 END $$;

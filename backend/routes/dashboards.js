@@ -2139,7 +2139,7 @@ router.get('/:tenantId/:domain', async (req, res) => {
     // ─── LEGACY PATH — hardcoded domain queries ───
     const validDomains = ['operations', 'labor', 'quality', 'timekeeping', 'safety'];
     if (!validDomains.includes(domain)) {
-      return res.status(400).json({ error: `Invalid domain. Must be one of: ${validDomains.join(', ')}` });
+      return res.status(400).json({ error: `Unknown domain: ${domain}` });
     }
 
     const data = await getDomainData(req.supabase, effectiveTenantId, domain, filters);

@@ -594,7 +594,7 @@ async function queryOpsKPI(supabase, tenantId, filters) {
 
 // ── Domain Dispatcher ──
 
-const SNOWFLAKE_DOMAINS = new Set(['action-items', 'inspections', 'turnover', 'work-tickets-qbu', 'ops-kpi']);
+const SNOWFLAKE_DOMAINS = new Set(['action-items', 'inspections', 'turnover', 'work-tickets-qbu', 'ops-kpi-qms']);
 
 async function getSnowflakeDomainData(supabase, tenantId, domain, filters) {
   switch (domain) {
@@ -606,7 +606,7 @@ async function getSnowflakeDomainData(supabase, tenantId, domain, filters) {
       return queryTurnover(supabase, tenantId, filters);
     case 'work-tickets-qbu':
       return queryWorkTicketsQBU(supabase, tenantId, filters);
-    case 'ops-kpi':
+    case 'ops-kpi-qms':
       return queryOpsKPI(supabase, tenantId, filters);
     default:
       throw new Error(`Unknown Snowflake domain: ${domain}`);
