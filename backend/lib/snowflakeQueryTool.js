@@ -38,6 +38,10 @@ const ALLOWED_VIEWS = new Set([
   'FACT_SUPPLY_REQUEST', 'FACT_SUPPLY_REQUEST_DETAIL',
   'FACT_EMPLOYEE_HISTORY', 'FACT_JOB_HISTORY',
   'FACT_CUSTOMER_HISTORY', 'FACT_BUDGET_DETAIL',
+  // QBU dashboards
+  'FACT_CHECKPOINT', 'FACT_CHECKPOINT_LINEITEM',
+  'FACT_EMPLOYEE_WORKFORCE_DAILY', 'FACT_EMPLOYEE_STATUS_HISTORY',
+  'DIM_WORK_SCHEDULE_TASK',
 ]);
 
 // ── Tenant isolation categories ──
@@ -64,9 +68,15 @@ const JOB_KEY_VIEWS = new Set([
   'FACT_EMPLOYEE_HISTORY', 'FACT_JOB_HISTORY',
   'FACT_CUSTOMER_HISTORY', 'FACT_BUDGET_DETAIL',
   'FACT_APPLICANT',
+  'FACT_CHECKPOINT', 'FACT_CHECKPOINT_LINEITEM',
   'DIM_CUSTOMER', 'DIM_VENDOR', 'DIM_PURCHASE_ORDER',
   'DIM_INVOICE', 'DIM_INVENTORY_ITEM', 'DIM_EQUIPMENT',
   'DIM_INSURANCE_CLAIM', 'DIM_POSITION',
+]);
+
+// Views joined to DIM_JOB via PRIMARY_JOB_KEY
+const PRIMARY_JOB_KEY_VIEWS = new Set([
+  'FACT_EMPLOYEE_WORKFORCE_DAILY', 'FACT_EMPLOYEE_STATUS_HISTORY',
 ]);
 
 // Views joined via employee primary job number
@@ -80,7 +90,7 @@ const REFERENCE_VIEWS = new Set([
   'DIM_BENEFIT_PLAN', 'DIM_DEDUCTION', 'DIM_TAX', 'DIM_ACCRUAL',
   'DIM_DEPARTMENT', 'DIM_DIVISION', 'DIM_BRANCH', 'DIM_COMPANY',
   'DIM_EMPLOYEE_CERTIFICATION', 'DIM_EMPLOYEE_REVIEW',
-  'DIM_DIRECT_DEPOSIT',
+  'DIM_DIRECT_DEPOSIT', 'DIM_WORK_SCHEDULE_TASK',
 ]);
 
 // Column name validation — alphanumeric + underscore only
@@ -122,6 +132,9 @@ function buildSafeQuery(input, config) {
   } else if (JOB_KEY_VIEWS.has(viewName)) {
     binds.push(companyFilter);
     conditions.push(`JOB_KEY IN (SELECT JOB_KEY FROM ${fq}.DIM_JOB WHERE JOB_COMPANY_NAME = :${binds.length})`);
+  } else if (PRIMARY_JOB_KEY_VIEWS.has(viewName)) {
+    binds.push(companyFilter);
+    conditions.push(`PRIMARY_JOB_KEY IN (SELECT JOB_KEY FROM ${fq}.DIM_JOB WHERE JOB_COMPANY_NAME = :${binds.length})`);
   } else if (EMPLOYEE_JOB_VIEWS.has(viewName)) {
     binds.push(companyFilter);
     conditions.push(`EMPLOYEE_PRIMARY_JOB_NUMBER IN (SELECT JOB_NUMBER FROM ${fq}.DIM_JOB WHERE JOB_COMPANY_NAME = :${binds.length})`);

@@ -5,6 +5,7 @@ import { getUserScopedJobIds, intersectJobIds } from '../lib/scopedJobs.js';
 import { getUserTemplate } from '../lib/userTemplate.js';
 import { extractMemories } from './memory.js';
 import { executeMetrics, evaluateThresholds, getAllowedTables } from '../lib/metricEngine.js';
+import { SNOWFLAKE_DOMAINS, getSnowflakeDomainData } from '../lib/snowflakeDashboards.js';
 
 const router = Router();
 
@@ -2120,6 +2121,19 @@ router.get('/:tenantId/:domain', async (req, res) => {
         setCache(key, dynamicData);
         return res.json(dynamicData);
       }
+    }
+
+    // ─── Snowflake-direct QBU domains ───
+    if (SNOWFLAKE_DOMAINS.has(domain)) {
+      const sfFilters = {
+        ...filters,
+        itemType: req.query.itemType || null,
+        inspectionType: req.query.inspectionType || null,
+        ticketType: req.query.ticketType || null,
+      };
+      const data = await getSnowflakeDomainData(req.supabase, effectiveTenantId, domain, sfFilters);
+      setCache(key, data);
+      return res.json(data);
     }
 
     // ─── LEGACY PATH — hardcoded domain queries ───
