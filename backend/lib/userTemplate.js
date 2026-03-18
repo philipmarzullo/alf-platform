@@ -52,9 +52,19 @@ export async function getUserTemplate(supabase, userId, tenantId, role) {
 
   // If allowed_dashboards is set on profile, use it directly for domain filtering
   if (profile?.allowed_dashboards !== null && profile?.allowed_dashboards !== undefined) {
-    const domains = profile.allowed_dashboards.length === 0
-      ? ALL_DOMAINS  // empty array = all dashboards
-      : profile.allowed_dashboards;
+    let domains;
+    if (profile.allowed_dashboards.length === 0) {
+      // empty array = all dashboards — include legacy + tenant's actual Snowflake domains
+      const { data: tenantDomains } = await supabase
+        .from('tenant_dashboard_domains')
+        .select('domain_key')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true);
+      const sfDomainKeys = tenantDomains ? tenantDomains.map(d => d.domain_key) : [];
+      domains = [...ALL_DOMAINS, ...sfDomainKeys];
+    } else {
+      domains = profile.allowed_dashboards;
+    }
 
     // Get metric_tier from template if assigned, otherwise default
     let metricTier = 'operational';
