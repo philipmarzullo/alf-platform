@@ -783,7 +783,7 @@ router.post('/', rateLimit, async (req, res) => {
       if (effectiveTenantId && agent_key && messages.length >= 4) {
         const responseText = data.content?.[0]?.text || '';
         if (responseText) {
-          const dept = agentRow?.knowledge_scopes?.[0] || 'general';
+          const dept = getKnowledgeContext._lastAgent?.knowledge_scopes?.[0] || 'general';
           const conversationText = messages
             .slice(-4)
             .map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
