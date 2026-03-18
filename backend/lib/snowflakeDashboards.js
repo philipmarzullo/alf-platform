@@ -409,9 +409,192 @@ async function queryWorkTicketsQBU(supabase, tenantId, filters) {
   };
 }
 
+// ── DOMAIN: ops-kpi ──
+
+async function queryOpsKPI(supabase, tenantId, filters) {
+  const { connector, config } = await getConnector(supabase, tenantId);
+  const prefix = fq(config);
+
+  // Three parallel queries, aggregated in JS for VP and Manager rollup.
+
+  const binds1 = [config.company_filter];
+  const baseCond = [`j.JOB_COMPANY_NAME = :1`, `j.IS_JOB_ACTIVE_FLAG = 1`];
+  baseCond.push(...dateFilter('d.CALENDAR_DATE', filters, binds1));
+  if (filters.vp) {
+    binds1.push(filters.vp);
+    baseCond.push(`j.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds1.length}`);
+  }
+  if (filters.manager) {
+    binds1.push(filters.manager);
+    baseCond.push(`j.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds1.length}`);
+  }
+
+  // Query 1: Job-level checkpoint aggregation
+  const checkpointSql = `
+    SELECT
+      j.JOB_KEY,
+      j.JOB_TIER_08_CURRENT_VALUE_LABEL AS VP,
+      j.JOB_TIER_03_CURRENT_VALUE_LABEL AS MANAGER,
+      COUNT(DISTINCT CASE WHEN fc.CHECKPOINT_TEMPLATE_DESCRIPTION LIKE '%Safety%' THEN fc.CHECKPOINT_ID END) AS safety_count,
+      COUNT(DISTINCT CASE WHEN fc.CHECKPOINT_TEMPLATE_DESCRIPTION LIKE '%Commercial%' THEN fc.CHECKPOINT_ID END) AS commercial_count
+    FROM ${prefix}.DIM_JOB j
+    LEFT JOIN ${prefix}.FACT_CHECKPOINT fc ON fc.JOB_KEY = j.JOB_KEY
+    LEFT JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = fc.CHECKPOINT_PERFORMED_DATE_KEY
+    WHERE ${baseCond.join(' AND ')}
+    GROUP BY j.JOB_KEY, j.JOB_TIER_08_CURRENT_VALUE_LABEL, j.JOB_TIER_03_CURRENT_VALUE_LABEL
+  `;
+
+  // Query 2: Deficiency data per job
+  const binds2 = [config.company_filter];
+  const defCond = [`j.JOB_COMPANY_NAME = :1`, `j.IS_JOB_ACTIVE_FLAG = 1`];
+  defCond.push(...dateFilter('d2.CALENDAR_DATE', filters, binds2));
+  if (filters.vp) {
+    binds2.push(filters.vp);
+    defCond.push(`j.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds2.length}`);
+  }
+  if (filters.manager) {
+    binds2.push(filters.manager);
+    defCond.push(`j.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds2.length}`);
+  }
+
+  const deficiencySql = `
+    SELECT
+      j.JOB_KEY,
+      1 AS has_deficiency,
+      AVG(CASE
+        WHEN li.IS_CHECKPOINT_ITEM_DEFICIENCY_CLOSED_FLAG = 1
+             AND li.CHECKPOINT_DEFICIENT_ITEM_CLOSED_TIMESTAMP IS NOT NULL
+        THEN DATEDIFF('day', d2.CALENDAR_DATE, li.CHECKPOINT_DEFICIENT_ITEM_CLOSED_TIMESTAMP)
+        ELSE NULL
+      END) AS avg_close_days
+    FROM ${prefix}.DIM_JOB j
+    JOIN ${prefix}.FACT_CHECKPOINT_LINEITEM li ON li.JOB_KEY = j.JOB_KEY
+    JOIN ${prefix}.DIM_DATE d2 ON d2.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+    WHERE ${defCond.join(' AND ')}
+      AND li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1
+    GROUP BY j.JOB_KEY
+  `;
+
+  // Query 3: Total jobs per VP/Manager (including jobs with NO checkpoints in period)
+  const binds3 = [config.company_filter];
+  const jobCond = [`j.JOB_COMPANY_NAME = :1`, `j.IS_JOB_ACTIVE_FLAG = 1`];
+  if (filters.vp) {
+    binds3.push(filters.vp);
+    jobCond.push(`j.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds3.length}`);
+  }
+  if (filters.manager) {
+    binds3.push(filters.manager);
+    jobCond.push(`j.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds3.length}`);
+  }
+
+  const allJobsSql = `
+    SELECT
+      j.JOB_KEY,
+      j.JOB_TIER_08_CURRENT_VALUE_LABEL AS VP,
+      j.JOB_TIER_03_CURRENT_VALUE_LABEL AS MANAGER
+    FROM ${prefix}.DIM_JOB j
+    WHERE ${jobCond.join(' AND ')}
+  `;
+
+  const [checkpointRows, deficiencyRows, allJobRows] = await Promise.all([
+    connector.queryView(checkpointSql, binds1),
+    connector.queryView(deficiencySql, binds2),
+    connector.queryView(allJobsSql, binds3),
+  ]);
+
+  // Build deficiency lookup by JOB_KEY
+  const defByJob = new Map();
+  for (const r of deficiencyRows) {
+    defByJob.set(r.job_key, {
+      has_deficiency: true,
+      avg_close_days: r.avg_close_days != null ? Number(r.avg_close_days) : null,
+    });
+  }
+
+  // Build checkpoint lookup by JOB_KEY
+  const checkByJob = new Map();
+  for (const r of checkpointRows) {
+    checkByJob.set(r.job_key, {
+      vp: r.vp,
+      manager: r.manager,
+      safety_count: Number(r.safety_count) || 0,
+      commercial_count: Number(r.commercial_count) || 0,
+    });
+  }
+
+  // Roll up by VP
+  const vpMap = new Map();
+  const mgrMap = new Map();
+
+  for (const job of allJobRows) {
+    const vp = job.vp || '';
+    const mgr = job.manager || '';
+    if (!vp) continue;
+
+    const ck = checkByJob.get(job.job_key) || { safety_count: 0, commercial_count: 0 };
+    const def = defByJob.get(job.job_key);
+
+    // VP rollup
+    if (!vpMap.has(vp)) {
+      vpMap.set(vp, { vp, total_jobs: 0, jobs_with_safety: 0, safety_inspections: 0, jobs_with_commercial: 0, commercial_inspections: 0, sites_with_deficiencies: 0, close_days_sum: 0, close_days_count: 0 });
+    }
+    const vpRow = vpMap.get(vp);
+    vpRow.total_jobs++;
+    if (ck.safety_count > 0) { vpRow.jobs_with_safety++; vpRow.safety_inspections += ck.safety_count; }
+    if (ck.commercial_count > 0) { vpRow.jobs_with_commercial++; vpRow.commercial_inspections += ck.commercial_count; }
+    if (def?.has_deficiency) vpRow.sites_with_deficiencies++;
+    if (def?.avg_close_days != null) { vpRow.close_days_sum += def.avg_close_days; vpRow.close_days_count++; }
+
+    // Manager rollup
+    const mgrKey = `${vp}||${mgr}`;
+    if (!mgrMap.has(mgrKey)) {
+      mgrMap.set(mgrKey, { vp, manager: mgr, total_jobs: 0, jobs_with_safety: 0, safety_inspections: 0, jobs_with_commercial: 0, commercial_inspections: 0, sites_with_deficiencies: 0, close_days_sum: 0, close_days_count: 0 });
+    }
+    const mgrRow = mgrMap.get(mgrKey);
+    mgrRow.total_jobs++;
+    if (ck.safety_count > 0) { mgrRow.jobs_with_safety++; mgrRow.safety_inspections += ck.safety_count; }
+    if (ck.commercial_count > 0) { mgrRow.jobs_with_commercial++; mgrRow.commercial_inspections += ck.commercial_count; }
+    if (def?.has_deficiency) mgrRow.sites_with_deficiencies++;
+    if (def?.avg_close_days != null) { mgrRow.close_days_sum += def.avg_close_days; mgrRow.close_days_count++; }
+  }
+
+  function formatRow(r) {
+    return {
+      job_count: r.total_jobs,
+      pct_revenue_inspected_safety: r.total_jobs > 0 ? parseFloat(((r.jobs_with_safety / r.total_jobs) * 100).toFixed(1)) : 0,
+      safety_inspections: r.safety_inspections,
+      pct_revenue_inspected_commercial: r.total_jobs > 0 ? parseFloat(((r.jobs_with_commercial / r.total_jobs) * 100).toFixed(1)) : 0,
+      commercial_inspections: r.commercial_inspections,
+      sites_with_deficiencies: r.sites_with_deficiencies,
+      sites_with_incidents: null,     // Not available in Wavelytics
+      sites_with_good_saves: null,    // Not available in Wavelytics
+      sites_with_compliments: null,   // Not available in Wavelytics
+      avg_deficiency_closed_days: r.close_days_count > 0 ? parseFloat((r.close_days_sum / r.close_days_count).toFixed(1)) : null,
+    };
+  }
+
+  const vpSummary = Array.from(vpMap.values())
+    .map(r => ({ vp: r.vp, ...formatRow(r) }))
+    .sort((a, b) => a.vp.localeCompare(b.vp));
+
+  const mgrSummary = Array.from(mgrMap.values())
+    .map(r => ({ vp: r.vp, manager: r.manager, ...formatRow(r) }))
+    .sort((a, b) => a.manager.localeCompare(b.manager));
+
+  // Distinct VP and Manager values for filter dropdowns
+  const vpValues = [...new Set(allJobRows.map(r => r.vp).filter(Boolean))].sort();
+  const mgrValues = [...new Set(allJobRows.map(r => r.manager).filter(Boolean))].sort();
+
+  return {
+    vpSummary,
+    managerSummary: mgrSummary,
+    filters: { vpValues, managerValues: mgrValues },
+  };
+}
+
 // ── Domain Dispatcher ──
 
-const SNOWFLAKE_DOMAINS = new Set(['action-items', 'inspections', 'turnover', 'work-tickets-qbu']);
+const SNOWFLAKE_DOMAINS = new Set(['action-items', 'inspections', 'turnover', 'work-tickets-qbu', 'ops-kpi']);
 
 async function getSnowflakeDomainData(supabase, tenantId, domain, filters) {
   switch (domain) {
@@ -423,6 +606,8 @@ async function getSnowflakeDomainData(supabase, tenantId, domain, filters) {
       return queryTurnover(supabase, tenantId, filters);
     case 'work-tickets-qbu':
       return queryWorkTicketsQBU(supabase, tenantId, filters);
+    case 'ops-kpi':
+      return queryOpsKPI(supabase, tenantId, filters);
     default:
       throw new Error(`Unknown Snowflake domain: ${domain}`);
   }
