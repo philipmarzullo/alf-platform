@@ -59,6 +59,22 @@ const SKIP_PROFILE_PATTERNS = [
   '_KEY', '_ID', '_TIMESTAMP', '_DATE',
 ];
 
+// Columns to EXCLUDE entirely from the profile output (noise/metadata)
+function shouldExcludeColumn(colName) {
+  if (/CUSTOM_FIELD\d/.test(colName)) return true;
+  if (colName.endsWith('_JSON')) return true;
+  if (colName === 'TENANT_ID' || colName === 'TENANT_KEY') return true;
+  if (colName.startsWith('SOURCE_RECORD_')) return true;
+  if (colName.startsWith('WAREHOUSE_RECORD_')) return true;
+  if (colName === 'DATA_AS_OF_TIMESTAMP') return true;
+  if (colName === 'IS_DEFAULT_SEED_FLAG') return true;
+  if (colName.endsWith('_UQ')) return true;
+  // Skip internal surrogate keys (keep only main FK keys)
+  const KEEP_KEYS = new Set(['JOB_KEY', 'PRIMARY_JOB_KEY', 'EMPLOYEE_KEY', 'DATE_KEY', 'CHECKPOINT_ID']);
+  if (colName.endsWith('_KEY') && !KEEP_KEYS.has(colName) && !colName.endsWith('_DATE_KEY')) return true;
+  return false;
+}
+
 // Reference views — no company filter needed
 const REFERENCE_VIEWS = new Set([
   'DIM_DATE', 'DIM_TIME', 'DIM_HOURS_TYPE', 'DIM_LOOKUP',
@@ -214,30 +230,28 @@ export async function runSchemaProfile(supabase, tenantId) {
     const colParts = [];
 
     for (const col of cols) {
+      // Skip noise/metadata columns
+      if (shouldExcludeColumn(col.name)) continue;
+
       const key = `${view}.${col.name}`;
       const vals = distinctValues.get(key);
       let annotation = '';
 
       if (vals) {
         if (col.name.endsWith('_FLAG')) {
-          // Flag columns — just show (0/1)
           annotation = '(0/1)';
-        } else if (vals.length > 50 - 1) {
-          // Too many values
+        } else if (vals.length > 49) {
           annotation = `[*${vals.length}+ values]`;
-        } else if (vals.length > 15) {
-          // Show first 15 + count
-          const shown = vals.slice(0, 15).join('|');
-          annotation = `[${shown}|...+${vals.length - 15}]`;
+        } else if (vals.length > 10) {
+          const shown = vals.slice(0, 10).join('|');
+          annotation = `[${shown}|...+${vals.length - 10}]`;
         } else if (vals.length > 0) {
           annotation = `[${vals.join('|')}]`;
         }
       } else {
-        // No profiled values — annotate with type
         const typeAnn = formatType(col.type);
         if (typeAnn) annotation = `(${typeAnn})`;
 
-        // Annotate foreign keys
         if (col.name.endsWith('_DATE_KEY')) {
           annotation = '(→DIM_DATE)';
         } else if (col.name === 'JOB_KEY' || col.name === 'PRIMARY_JOB_KEY') {

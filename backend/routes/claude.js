@@ -598,12 +598,14 @@ router.post('/', rateLimit, async (req, res) => {
     const tools = snowflakeDirect && sfConfig ? [SNOWFLAKE_QUERY_TOOL] : [];
     let sfConnector = null;
 
-    // Safety cap: truncate enriched system prompt if too large (~150K chars ≈ 40K tokens)
-    const MAX_SYSTEM_CHARS = 150000;
+    // Safety cap: truncate enriched system prompt if too large (~80K chars ≈ 20K tokens)
+    const MAX_SYSTEM_CHARS = 80000;
     if (enrichedSystem.length > MAX_SYSTEM_CHARS) {
       console.warn(`[claude] System prompt too large (${enrichedSystem.length} chars), truncating to ${MAX_SYSTEM_CHARS}`);
       enrichedSystem = enrichedSystem.slice(0, MAX_SYSTEM_CHARS) + '\n\n[Context truncated due to size limits]';
     }
+
+    console.log(`[claude] Final system prompt: ${enrichedSystem.length} chars | messages: ${JSON.stringify(messages).length} chars | tools: ${tools.length}`);
 
     try {
       let apiMessages = [...messages];
