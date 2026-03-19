@@ -432,6 +432,14 @@ router.post('/', rateLimit, async (req, res) => {
     return res.status(400).json({ error: 'Missing required field: messages' });
   }
 
+  // Admin-only agent gate
+  const ADMIN_ROLES = new Set(['admin', 'super-admin', 'platform_owner']);
+  const userRole = req.user?.role;
+
+  if (agent_key === 'analytics' && !ADMIN_ROLES.has(userRole)) {
+    return res.status(403).json({ error: 'Analytics agent requires admin access' });
+  }
+
   // Resolve API key (tenant → platform DB → env fallback)
   let apiKey, keySource, effectiveTenantId;
   try {
@@ -595,7 +603,7 @@ router.post('/', rateLimit, async (req, res) => {
       }
     }
 
-    const tools = snowflakeDirect && sfConfig ? [SNOWFLAKE_QUERY_TOOL] : [];
+    const tools = snowflakeDirect && sfConfig && ADMIN_ROLES.has(userRole) ? [SNOWFLAKE_QUERY_TOOL] : [];
     let sfConnector = null;
 
     // Safety cap: truncate enriched system prompt if too large (~80K chars ≈ 20K tokens)
