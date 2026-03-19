@@ -178,9 +178,22 @@ async function queryInspections(supabase, tenantId, filters) {
     : '';
   const inspTypeCondLi = (binds) => filters.inspectionType ? inspTypeCond('fc2', binds) : [];
 
+  // Default inspection types to include (matches Tableau scope)
+  const INCLUDED_TYPES = ['Commercial Inspection', 'Safety Inspection', 'Chicago Commercial Inspection'];
+  function defaultTypeCond(fcAlias, binds) {
+    if (filters.inspectionType) return []; // user picked a specific type — don't override
+    const placeholders = INCLUDED_TYPES.map(t => { binds.push(t); return `:${binds.length}`; });
+    return [`${fcAlias}.CHECKPOINT_TEMPLATE_DESCRIPTION IN (${placeholders.join(', ')})`];
+  }
+  // For lineitem queries we need the FACT_CHECKPOINT join to access template description
+  const defaultTypeJoin = (liAlias) =>
+    !filters.inspectionType ? `JOIN ${prefix}.FACT_CHECKPOINT fc_dt ON fc_dt.CHECKPOINT_ID = ${liAlias}.CHECKPOINT_ID` : '';
+  const defaultTypeCondLi = (binds) =>
+    !filters.inspectionType ? defaultTypeCond('fc_dt', binds) : [];
+
   // Q1: Inspection count (KPI — COUNT DISTINCT CHECKPOINT_ID)
   const b1 = [config.company_filter];
-  const c1 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b1), ...jobConds('j', b1), ...inspTypeCond('fc', b1)];
+  const c1 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b1), ...jobConds('j', b1), ...inspTypeCond('fc', b1), ...defaultTypeCond('fc', b1)];
   const q1 = `
     SELECT COUNT(DISTINCT fc.CHECKPOINT_ID) AS cnt
     FROM ${prefix}.FACT_CHECKPOINT fc
@@ -191,7 +204,7 @@ async function queryInspections(supabase, tenantId, filters) {
 
   // Q2: Job Detail — line items per job (also feeds KPIs: items total + deficient)
   const b2 = [config.company_filter];
-  const c2 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b2), ...jobConds('j', b2), ...inspTypeCondLi(b2)];
+  const c2 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b2), ...jobConds('j', b2), ...inspTypeCondLi(b2), ...defaultTypeCondLi(b2)];
   const q2 = `
     SELECT
       j.JOB_KEY, j.JOB_NUMBER, j.JOB_NAME,
@@ -201,6 +214,7 @@ async function queryInspections(supabase, tenantId, filters) {
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
     JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     ${inspTypeJoin('li')}
+    ${defaultTypeJoin('li')}
     WHERE ${c2.join(' AND ')}
     GROUP BY j.JOB_KEY, j.JOB_NUMBER, j.JOB_NAME
     ORDER BY deficient_items DESC
@@ -208,7 +222,7 @@ async function queryInspections(supabase, tenantId, filters) {
 
   // Q3: Weekly deficiency trend
   const b3 = [config.company_filter];
-  const c3 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b3), ...jobConds('j', b3), ...inspTypeCondLi(b3)];
+  const c3 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b3), ...jobConds('j', b3), ...inspTypeCondLi(b3), ...defaultTypeCondLi(b3)];
   const q3 = `
     SELECT
       DATE_TRUNC('week', d.CALENDAR_DATE) AS period,
@@ -218,6 +232,7 @@ async function queryInspections(supabase, tenantId, filters) {
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
     JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     ${inspTypeJoin('li')}
+    ${defaultTypeJoin('li')}
     WHERE ${c3.join(' AND ')}
     GROUP BY DATE_TRUNC('week', d.CALENDAR_DATE)
     ORDER BY period
@@ -225,7 +240,7 @@ async function queryInspections(supabase, tenantId, filters) {
 
   // Q4: Monthly deficiency trend
   const b4 = [config.company_filter];
-  const c4 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b4), ...jobConds('j', b4), ...inspTypeCondLi(b4)];
+  const c4 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b4), ...jobConds('j', b4), ...inspTypeCondLi(b4), ...defaultTypeCondLi(b4)];
   const q4 = `
     SELECT
       DATE_TRUNC('month', d.CALENDAR_DATE) AS period,
@@ -235,6 +250,7 @@ async function queryInspections(supabase, tenantId, filters) {
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
     JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     ${inspTypeJoin('li')}
+    ${defaultTypeJoin('li')}
     WHERE ${c4.join(' AND ')}
     GROUP BY DATE_TRUNC('month', d.CALENDAR_DATE)
     ORDER BY period
@@ -242,7 +258,7 @@ async function queryInspections(supabase, tenantId, filters) {
 
   // Q5: Days since last inspection — NO date range filter (shows all-time per job)
   const b5 = [config.company_filter];
-  const c5 = [`j.JOB_COMPANY_NAME = :1`, ...jobConds('j', b5), ...inspTypeCond('fc', b5)];
+  const c5 = [`j.JOB_COMPANY_NAME = :1`, ...jobConds('j', b5), ...inspTypeCond('fc', b5), ...defaultTypeCond('fc', b5)];
   const q5 = `
     SELECT
       j.JOB_NUMBER, j.JOB_NAME,
@@ -259,7 +275,7 @@ async function queryInspections(supabase, tenantId, filters) {
 
   // Q6: Deficiency % by Area — top 10
   const b6 = [config.company_filter];
-  const c6 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b6), ...jobConds('j', b6), ...inspTypeCondLi(b6)];
+  const c6 = [`j.JOB_COMPANY_NAME = :1`, ...dateFilter('d.CALENDAR_DATE', filters, b6), ...jobConds('j', b6), ...inspTypeCondLi(b6), ...defaultTypeCondLi(b6)];
   const q6 = `
     SELECT
       li.CHECKPOINT_AREA_LABEL AS area,
@@ -269,6 +285,7 @@ async function queryInspections(supabase, tenantId, filters) {
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
     JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     ${inspTypeJoin('li')}
+    ${defaultTypeJoin('li')}
     WHERE ${c6.join(' AND ')}
     GROUP BY li.CHECKPOINT_AREA_LABEL
     HAVING SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) > 0
@@ -279,17 +296,18 @@ async function queryInspections(supabase, tenantId, filters) {
   // Q7: Deficiency Detail — individual deficient line items
   const b7 = [config.company_filter];
   const c7 = [`j.JOB_COMPANY_NAME = :1`, `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
-    ...dateFilter('d.CALENDAR_DATE', filters, b7), ...jobConds('j', b7), ...inspTypeCondLi(b7)];
+    ...dateFilter('d.CALENDAR_DATE', filters, b7), ...jobConds('j', b7), ...inspTypeCondLi(b7), ...defaultTypeCondLi(b7)];
   const q7 = `
     SELECT
       li.CHECKPOINT_ID,
       li.CHECKPOINT_AREA_LABEL AS area,
-      li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT AS result_notes,
+      COALESCE(li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT, li.CHECKPOINT_ITEM_LABEL) AS result_notes,
       j.JOB_KEY, j.JOB_NUMBER
     FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
     JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
     JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
     ${inspTypeJoin('li')}
+    ${defaultTypeJoin('li')}
     WHERE ${c7.join(' AND ')}
     ORDER BY d.CALENDAR_DATE DESC
     LIMIT 5000
@@ -371,6 +389,7 @@ async function queryInspections(supabase, tenantId, filters) {
     filters: {
       vpValues: [...new Set(r8.map(r => r.vp).filter(Boolean))].sort(),
       managerValues: [...new Set(r8.map(r => r.manager).filter(Boolean))].sort(),
+      vpManagerPairs: r8.filter(r => r.vp && r.manager).map(r => ({ vp: r.vp, manager: r.manager })),
       inspectionTypes: r9.map(r => r.inspection_type).filter(Boolean),
     },
   };
