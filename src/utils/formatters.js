@@ -40,3 +40,9 @@ export function estimateCost(totalTokens, { inputTokens, outputTokens } = {}) {
   // Blended: assume ~70% input, ~30% output → ~$6.60/M
   return ((totalTokens * 6.6) / 1_000_000).toFixed(2);
 }
+
+/** Estimate Snowflake cost: ~0.003 credits/query × $3/credit = $0.009/query */
+export function estimateSnowflakeCost(queryCount) {
+  if (!queryCount) return '0.00';
+  return (queryCount * 0.009).toFixed(2);
+}

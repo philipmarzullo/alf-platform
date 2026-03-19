@@ -610,6 +610,7 @@ router.post('/', rateLimit, async (req, res) => {
     try {
       let apiMessages = [...messages];
       let totalInput = 0, totalOutput = 0;
+      let sfQueryCount = 0;
       let data;
       const MAX_ROUNDS = 5;
 
@@ -658,6 +659,7 @@ router.post('/', rateLimit, async (req, res) => {
           console.log(`[claude] Tool call: ${block.name}(${JSON.stringify(block.input).slice(0, 200)})`);
           try {
             const result = await executeSnowflakeQuery(block.input, sfConnector, sfConfig);
+            sfQueryCount++;
             let resultStr = JSON.stringify(result);
             if (resultStr.length > MAX_TOOL_RESULT_CHARS) {
               const rowCount = Array.isArray(result) ? result.length : (result?.rows?.length || '?');
@@ -690,6 +692,8 @@ router.post('/', rateLimit, async (req, res) => {
           tokens_input: inputTokens,
           tokens_output: outputTokens,
           model,
+          snowflake_queries: sfQueryCount,
+          snowflake_credits_est: sfQueryCount * 0.003,
         })
         .then(({ error }) => {
           if (error) console.warn('[claude] Usage log failed:', error.message);

@@ -1,30 +1,43 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Activity, Zap, Hash, Loader2 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Activity, Zap, Hash, Loader2, DollarSign, Database } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import MetricCard from '../../components/shared/MetricCard';
 import DataTable from '../../components/shared/DataTable';
+import { estimateCost, estimateSnowflakeCost } from '../../utils/formatters';
+
+const PRESETS = [
+  { label: '7d', days: 7 },
+  { label: '30d', days: 30 },
+  { label: '90d', days: 90 },
+];
+
+function daysAgo(n) {
+  return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export default function PlatformUsagePage() {
   const [logs, setLogs] = useState([]);
   const [tenantMap, setTenantMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [dateFrom, setDateFrom] = useState(daysAgo(30));
+  const [dateTo, setDateTo] = useState(today());
+  const [activePreset, setActivePreset] = useState('30d');
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
-
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
 
     const [logsRes, tenantsRes] = await Promise.all([
       supabase
         .from('alf_usage_logs')
         .select('*')
-        .gte('created_at', thirtyDaysAgo)
+        .gte('created_at', `${dateFrom}T00:00:00`)
+        .lte('created_at', `${dateTo}T23:59:59`)
         .order('created_at', { ascending: false })
         .limit(5000),
       supabase.from('alf_tenants').select('id, company_name'),
@@ -42,6 +55,22 @@ export default function PlatformUsagePage() {
     setLogs(logsRes.data || []);
     setTenantMap(tMap);
     setLoading(false);
+  }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  function applyPreset(preset) {
+    setActivePreset(preset.label);
+    setDateFrom(daysAgo(preset.days));
+    setDateTo(today());
+  }
+
+  function handleDateChange(field, value) {
+    setActivePreset(null);
+    if (field === 'from') setDateFrom(value);
+    else setDateTo(value);
   }
 
   // Aggregate daily chart data
@@ -49,11 +78,21 @@ export default function PlatformUsagePage() {
     const dayMap = {};
     logs.forEach((log) => {
       const day = log.created_at.slice(0, 10);
-      if (!dayMap[day]) dayMap[day] = { day, calls: 0, tokens: 0 };
+      if (!dayMap[day]) dayMap[day] = { day, calls: 0, tokens: 0, tokens_input: 0, tokens_output: 0, sf_queries: 0 };
       dayMap[day].calls += 1;
+      dayMap[day].tokens_input += log.tokens_input || 0;
+      dayMap[day].tokens_output += log.tokens_output || 0;
       dayMap[day].tokens += (log.tokens_input || 0) + (log.tokens_output || 0);
+      dayMap[day].sf_queries += log.snowflake_queries || 0;
     });
-    return Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day));
+    // Compute daily costs
+    return Object.values(dayMap)
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .map((d) => ({
+        ...d,
+        anthropic_cost: parseFloat(estimateCost(0, { inputTokens: d.tokens_input, outputTokens: d.tokens_output })),
+        sf_cost: parseFloat(estimateSnowflakeCost(d.sf_queries)),
+      }));
   }, [logs]);
 
   // By-tenant aggregation
@@ -61,11 +100,21 @@ export default function PlatformUsagePage() {
     const map = {};
     logs.forEach((log) => {
       const tid = log.tenant_id || 'unknown';
-      if (!map[tid]) map[tid] = { tenant_id: tid, tenant_name: tenantMap[tid] || 'Unknown', calls: 0, tokens: 0 };
+      if (!map[tid]) map[tid] = { tenant_id: tid, tenant_name: tenantMap[tid] || 'Unknown', calls: 0, tokens_input: 0, tokens_output: 0, sf_queries: 0 };
       map[tid].calls += 1;
-      map[tid].tokens += (log.tokens_input || 0) + (log.tokens_output || 0);
+      map[tid].tokens_input += log.tokens_input || 0;
+      map[tid].tokens_output += log.tokens_output || 0;
+      map[tid].sf_queries += log.snowflake_queries || 0;
     });
-    return Object.values(map).sort((a, b) => b.calls - a.calls);
+    return Object.values(map)
+      .map((t) => ({
+        ...t,
+        tokens: t.tokens_input + t.tokens_output,
+        api_cost: parseFloat(estimateCost(0, { inputTokens: t.tokens_input, outputTokens: t.tokens_output })),
+        sf_cost: parseFloat(estimateSnowflakeCost(t.sf_queries)),
+        total_cost: parseFloat(estimateCost(0, { inputTokens: t.tokens_input, outputTokens: t.tokens_output })) + parseFloat(estimateSnowflakeCost(t.sf_queries)),
+      }))
+      .sort((a, b) => b.calls - a.calls);
   }, [logs, tenantMap]);
 
   // By-agent aggregation
@@ -73,16 +122,33 @@ export default function PlatformUsagePage() {
     const map = {};
     logs.forEach((log) => {
       const key = log.agent_key || 'unknown';
-      if (!map[key]) map[key] = { agent_key: key, calls: 0, tokens: 0 };
+      if (!map[key]) map[key] = { agent_key: key, calls: 0, tokens_input: 0, tokens_output: 0, sf_queries: 0 };
       map[key].calls += 1;
-      map[key].tokens += (log.tokens_input || 0) + (log.tokens_output || 0);
+      map[key].tokens_input += log.tokens_input || 0;
+      map[key].tokens_output += log.tokens_output || 0;
+      map[key].sf_queries += log.snowflake_queries || 0;
     });
-    return Object.values(map).sort((a, b) => b.calls - a.calls);
+    return Object.values(map)
+      .map((a) => ({
+        ...a,
+        tokens: a.tokens_input + a.tokens_output,
+        api_cost: parseFloat(estimateCost(0, { inputTokens: a.tokens_input, outputTokens: a.tokens_output })),
+        sf_cost: parseFloat(estimateSnowflakeCost(a.sf_queries)),
+        total_cost: parseFloat(estimateCost(0, { inputTokens: a.tokens_input, outputTokens: a.tokens_output })) + parseFloat(estimateSnowflakeCost(a.sf_queries)),
+      }))
+      .sort((a, b) => b.calls - a.calls);
   }, [logs]);
 
   const totalCalls = logs.length;
-  const totalTokens = logs.reduce((sum, l) => sum + (l.tokens_input || 0) + (l.tokens_output || 0), 0);
+  const totalInput = logs.reduce((sum, l) => sum + (l.tokens_input || 0), 0);
+  const totalOutput = logs.reduce((sum, l) => sum + (l.tokens_output || 0), 0);
+  const totalTokens = totalInput + totalOutput;
   const uniqueUsers = new Set(logs.map((l) => l.user_id)).size;
+  const totalSfQueries = logs.reduce((sum, l) => sum + (l.snowflake_queries || 0), 0);
+  const anthropicCost = estimateCost(0, { inputTokens: totalInput, outputTokens: totalOutput });
+  const sfCost = estimateSnowflakeCost(totalSfQueries);
+
+  const rangeLabel = activePreset ? `last ${activePreset}` : `${dateFrom} — ${dateTo}`;
 
   if (loading) {
     return (
@@ -96,7 +162,41 @@ export default function PlatformUsagePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-dark-text">Usage Dashboard</h1>
-        <p className="text-sm text-secondary-text mt-1">Agent usage across all tenants (last 30 days)</p>
+        <p className="text-sm text-secondary-text mt-1">Agent usage across all tenants ({rangeLabel})</p>
+      </div>
+
+      {/* Date range picker */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1">
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => applyPreset(p)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                activePreset === p.label
+                  ? 'bg-alf-orange text-white border-alf-orange'
+                  : 'bg-white text-secondary-text border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => handleDateChange('from', e.target.value)}
+            className="border border-gray-200 rounded-md px-2 py-1.5 text-xs"
+          />
+          <span className="text-secondary-text">to</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => handleDateChange('to', e.target.value)}
+            className="border border-gray-200 rounded-md px-2 py-1.5 text-xs"
+          />
+        </div>
       </div>
 
       {error && (
@@ -105,13 +205,27 @@ export default function PlatformUsagePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <MetricCard label="Total Calls" value={totalCalls.toLocaleString()} icon={Activity} color="#F59E0B" />
-        <MetricCard label="Total Tokens" value={totalTokens.toLocaleString()} icon={Zap} color="#F59E0B" />
-        <MetricCard label="Unique Users" value={uniqueUsers} icon={Hash} color="#F59E0B" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <MetricCard label="Total Calls" value={totalCalls.toLocaleString()} icon={Activity} color="#C84B0A" />
+        <MetricCard label="Total Tokens" value={totalTokens.toLocaleString()} icon={Zap} color="#C84B0A" />
+        <MetricCard label="Unique Users" value={uniqueUsers} icon={Hash} color="#C84B0A" />
+        <MetricCard
+          label="Anthropic Cost"
+          value={`$${anthropicCost}`}
+          icon={DollarSign}
+          color="#C84B0A"
+          trend={`${totalInput.toLocaleString()} in / ${totalOutput.toLocaleString()} out`}
+        />
+        <MetricCard
+          label="Snowflake Cost"
+          value={`$${sfCost}`}
+          icon={Database}
+          color="#C84B0A"
+          trend={`${totalSfQueries.toLocaleString()} queries`}
+        />
       </div>
 
-      {/* Daily Bar Chart */}
+      {/* Daily Agent Calls Chart */}
       <div className="bg-white rounded-lg border border-gray-200 p-5">
         <h2 className="text-sm font-semibold text-dark-text mb-4">Daily Agent Calls</h2>
         {chartData.length > 0 ? (
@@ -127,12 +241,44 @@ export default function PlatformUsagePage() {
                 contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
                 labelFormatter={(d) => `Date: ${d}`}
               />
-              <Bar dataKey="calls" fill="#F59E0B" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="calls" fill="#C84B0A" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
           <div className="h-64 flex items-center justify-center text-sm text-secondary-text">
-            No usage data in the last 30 days.
+            No usage data in selected range.
+          </div>
+        )}
+      </div>
+
+      {/* Daily Cost Chart */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-sm font-semibold text-dark-text mb-4">Daily Cost Breakdown</h2>
+        {chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={chartData}>
+              <XAxis
+                dataKey="day"
+                tickFormatter={(d) => d.slice(5)}
+                tick={{ fontSize: 11, fill: '#5A5D62' }}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#5A5D62' }}
+                tickFormatter={(v) => `$${v}`}
+              />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                labelFormatter={(d) => `Date: ${d}`}
+                formatter={(value, name) => [`$${value.toFixed(2)}`, name === 'anthropic_cost' ? 'Anthropic' : 'Snowflake']}
+              />
+              <Legend formatter={(value) => (value === 'anthropic_cost' ? 'Anthropic' : 'Snowflake')} />
+              <Bar dataKey="anthropic_cost" stackId="cost" fill="#C84B0A" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="sf_cost" stackId="cost" fill="#3B82F6" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-64 flex items-center justify-center text-sm text-secondary-text">
+            No cost data in selected range.
           </div>
         )}
       </div>
@@ -145,6 +291,10 @@ export default function PlatformUsagePage() {
             { key: 'tenant_name', label: 'Tenant' },
             { key: 'calls', label: 'Calls', render: (val) => val.toLocaleString() },
             { key: 'tokens', label: 'Tokens', render: (val) => val.toLocaleString() },
+            { key: 'api_cost', label: 'API Cost', render: (val) => `$${val.toFixed(2)}` },
+            { key: 'sf_queries', label: 'SF Queries', render: (val) => val.toLocaleString() },
+            { key: 'sf_cost', label: 'SF Cost', render: (val) => `$${val.toFixed(2)}` },
+            { key: 'total_cost', label: 'Total Cost', render: (val) => <span className="font-semibold">${val.toFixed(2)}</span> },
           ]}
           data={byTenant}
         />
@@ -158,6 +308,10 @@ export default function PlatformUsagePage() {
             { key: 'agent_key', label: 'Agent', render: (val) => <span className="font-mono text-xs">{val}</span> },
             { key: 'calls', label: 'Calls', render: (val) => val.toLocaleString() },
             { key: 'tokens', label: 'Tokens', render: (val) => val.toLocaleString() },
+            { key: 'api_cost', label: 'API Cost', render: (val) => `$${val.toFixed(2)}` },
+            { key: 'sf_queries', label: 'SF Queries', render: (val) => val.toLocaleString() },
+            { key: 'sf_cost', label: 'SF Cost', render: (val) => `$${val.toFixed(2)}` },
+            { key: 'total_cost', label: 'Total Cost', render: (val) => <span className="font-semibold">${val.toFixed(2)}</span> },
           ]}
           data={byAgent}
         />
