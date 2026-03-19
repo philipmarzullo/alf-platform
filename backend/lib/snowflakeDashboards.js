@@ -12,11 +12,21 @@
 import SnowflakeConnector from '../sync/connectors/SnowflakeConnector.js';
 import { getPlatformApiKey } from '../routes/platformCredentials.js';
 
-// ── Lazy singleton connector per tenant ──
+// ── Lazy singleton connector per tenant (with 30-min TTL) ──
 const connectors = new Map();
+const CONNECTOR_TTL = 30 * 60 * 1000;
 
 async function getConnector(supabase, tenantId) {
-  if (connectors.has(tenantId)) return connectors.get(tenantId);
+  const cached = connectors.get(tenantId);
+  if (cached && (Date.now() - cached.ts) < CONNECTOR_TTL) {
+    return cached;
+  }
+
+  // Evict stale connector
+  if (cached) {
+    try { cached.connector.destroy?.(); } catch {}
+    connectors.delete(tenantId);
+  }
 
   const { data: sc } = await supabase
     .from('sync_configs')
@@ -34,8 +44,17 @@ async function getConnector(supabase, tenantId) {
 
   const connector = new SnowflakeConnector(tenantId, sc.config, credentials);
   await connector.connect();
-  connectors.set(tenantId, { connector, config: sc.config });
+  connectors.set(tenantId, { connector, config: sc.config, ts: Date.now() });
   return { connector, config: sc.config };
+}
+
+/** Evict a cached connector so the next call reconnects */
+function evictConnector(tenantId) {
+  const cached = connectors.get(tenantId);
+  if (cached) {
+    try { cached.connector.destroy?.(); } catch {}
+    connectors.delete(tenantId);
+  }
 }
 
 function fq(config) {
@@ -707,19 +726,32 @@ async function queryOpsKPI(supabase, tenantId, filters) {
 const SNOWFLAKE_DOMAINS = new Set(['action-items', 'inspections', 'turnover', 'work-tickets-qbu', 'ops-kpi-qms']);
 
 async function getSnowflakeDomainData(supabase, tenantId, domain, filters) {
-  switch (domain) {
-    case 'action-items':
-      return queryActionItems(supabase, tenantId, filters);
-    case 'inspections':
-      return queryInspections(supabase, tenantId, filters);
-    case 'turnover':
-      return queryTurnover(supabase, tenantId, filters);
-    case 'work-tickets-qbu':
-      return queryWorkTicketsQBU(supabase, tenantId, filters);
-    case 'ops-kpi-qms':
-      return queryOpsKPI(supabase, tenantId, filters);
-    default:
-      throw new Error(`Unknown Snowflake domain: ${domain}`);
+  const run = () => {
+    switch (domain) {
+      case 'action-items':
+        return queryActionItems(supabase, tenantId, filters);
+      case 'inspections':
+        return queryInspections(supabase, tenantId, filters);
+      case 'turnover':
+        return queryTurnover(supabase, tenantId, filters);
+      case 'work-tickets-qbu':
+        return queryWorkTicketsQBU(supabase, tenantId, filters);
+      case 'ops-kpi-qms':
+        return queryOpsKPI(supabase, tenantId, filters);
+      default:
+        throw new Error(`Unknown Snowflake domain: ${domain}`);
+    }
+  };
+
+  try {
+    return await run();
+  } catch (err) {
+    if (err.message?.includes('terminated connection')) {
+      console.warn(`[snowflake-dashboards] Stale connection for ${tenantId}, reconnecting...`);
+      evictConnector(tenantId);
+      return await run();
+    }
+    throw err;
   }
 }
 

@@ -107,6 +107,17 @@ router.get('/:tenantId/health', requireTenantAccess, async (req, res) => {
   const PLATFORM_CREDENTIAL_TYPES = ['snowflake'];
 
   try {
+    // 0. Tenants with snowflake_direct query live — no sync pipeline, always fresh
+    const { data: tenantRow } = await req.supabase
+      .from('alf_tenants')
+      .select('snowflake_direct')
+      .eq('id', tenantId)
+      .maybeSingle();
+
+    if (tenantRow?.snowflake_direct) {
+      return res.json({ status: 'healthy', credential_active: true, connector_type: 'snowflake', last_sync_at: new Date().toISOString() });
+    }
+
     // 1. Check for any sync config
     const { data: configs, error: cfgErr } = await req.supabase
       .from('sync_configs')
