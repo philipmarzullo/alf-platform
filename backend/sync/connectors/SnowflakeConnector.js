@@ -176,8 +176,10 @@ export default class SnowflakeConnector extends BaseConnector {
       throw new Error('tenant_database must be set in config or auto-derived from tenant slug');
     }
 
-    // Validate credential shape
-    const required = ['account', 'username', 'password', 'warehouse'];
+    // Validate credential shape — key-pair auth uses privateKey, legacy uses password
+    const hasKeyPair = !!this.credentials.privateKey;
+    const required = ['account', 'username', 'warehouse'];
+    if (!hasKeyPair) required.push('password');
     for (const field of required) {
       if (!this.credentials[field]) {
         throw new Error(`Snowflake credential missing required field: ${field}`);
@@ -191,16 +193,24 @@ export default class SnowflakeConnector extends BaseConnector {
     const fqPrefix = `${database}.${schema}`;
     this.queryMap = buildQueryMap(fqPrefix);
 
-    this.connection = snowflake.createConnection({
+    const connOpts = {
       account: this.credentials.account,
       username: this.credentials.username,
-      password: this.credentials.password,
       warehouse: this.credentials.warehouse,
       database,
       schema,
       role: this.credentials.role || 'ALF_SERVICE_ROLE',
       application: 'Alf_Platform',
-    });
+      authenticator: hasKeyPair ? 'SNOWFLAKE_JWT' : 'SNOWFLAKE',
+    };
+
+    if (hasKeyPair) {
+      connOpts.privateKey = this.credentials.privateKey;
+    } else {
+      connOpts.password = this.credentials.password;
+    }
+
+    this.connection = snowflake.createConnection(connOpts);
 
     await new Promise((resolve, reject) => {
       this.connection.connect((err, conn) => {
