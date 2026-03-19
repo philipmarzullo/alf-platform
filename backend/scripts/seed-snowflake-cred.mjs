@@ -15,8 +15,7 @@ const supabase = createClient(
 );
 
 const credential = JSON.stringify({
-  account: 'IK29268',
-  org: 'YLNLSSY',
+  account: 'ylnlssy-alf_production',
   username: 'ALF_SERVICE',
   password: 'ZiqBqzMZmiMxXgWTdo0SvRZfrqCWU37N2Ejkg9h/BkI=',
   warehouse: 'COMPUTE_WH',
