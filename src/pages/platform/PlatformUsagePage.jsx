@@ -28,6 +28,7 @@ export default function PlatformUsagePage() {
   const [dateFrom, setDateFrom] = useState(daysAgo(30));
   const [dateTo, setDateTo] = useState(today());
   const [activePreset, setActivePreset] = useState('30d');
+  const [selectedTenant, setSelectedTenant] = useState('all');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -73,10 +74,23 @@ export default function PlatformUsagePage() {
     else setDateTo(value);
   }
 
+  // Filter logs by selected tenant
+  const filteredLogs = useMemo(() => {
+    if (selectedTenant === 'all') return logs;
+    return logs.filter((l) => l.tenant_id === selectedTenant);
+  }, [logs, selectedTenant]);
+
+  // Sorted tenant list for dropdown
+  const tenantOptions = useMemo(() => {
+    return Object.entries(tenantMap)
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [tenantMap]);
+
   // Aggregate daily chart data
   const chartData = useMemo(() => {
     const dayMap = {};
-    logs.forEach((log) => {
+    filteredLogs.forEach((log) => {
       const day = log.created_at.slice(0, 10);
       if (!dayMap[day]) dayMap[day] = { day, calls: 0, tokens: 0, tokens_input: 0, tokens_output: 0, sf_queries: 0 };
       dayMap[day].calls += 1;
@@ -93,12 +107,12 @@ export default function PlatformUsagePage() {
         anthropic_cost: parseFloat(estimateCost(0, { inputTokens: d.tokens_input, outputTokens: d.tokens_output })),
         sf_cost: parseFloat(estimateSnowflakeCost(d.sf_queries)),
       }));
-  }, [logs]);
+  }, [filteredLogs]);
 
   // By-tenant aggregation
   const byTenant = useMemo(() => {
     const map = {};
-    logs.forEach((log) => {
+    filteredLogs.forEach((log) => {
       const tid = log.tenant_id || 'unknown';
       if (!map[tid]) map[tid] = { tenant_id: tid, tenant_name: tenantMap[tid] || 'Unknown', calls: 0, tokens_input: 0, tokens_output: 0, sf_queries: 0 };
       map[tid].calls += 1;
@@ -115,12 +129,12 @@ export default function PlatformUsagePage() {
         total_cost: parseFloat(estimateCost(0, { inputTokens: t.tokens_input, outputTokens: t.tokens_output })) + parseFloat(estimateSnowflakeCost(t.sf_queries)),
       }))
       .sort((a, b) => b.calls - a.calls);
-  }, [logs, tenantMap]);
+  }, [filteredLogs, tenantMap]);
 
   // By-agent aggregation
   const byAgent = useMemo(() => {
     const map = {};
-    logs.forEach((log) => {
+    filteredLogs.forEach((log) => {
       const key = log.agent_key || 'unknown';
       if (!map[key]) map[key] = { agent_key: key, calls: 0, tokens_input: 0, tokens_output: 0, sf_queries: 0 };
       map[key].calls += 1;
@@ -137,18 +151,19 @@ export default function PlatformUsagePage() {
         total_cost: parseFloat(estimateCost(0, { inputTokens: a.tokens_input, outputTokens: a.tokens_output })) + parseFloat(estimateSnowflakeCost(a.sf_queries)),
       }))
       .sort((a, b) => b.calls - a.calls);
-  }, [logs]);
+  }, [filteredLogs]);
 
-  const totalCalls = logs.length;
-  const totalInput = logs.reduce((sum, l) => sum + (l.tokens_input || 0), 0);
-  const totalOutput = logs.reduce((sum, l) => sum + (l.tokens_output || 0), 0);
+  const totalCalls = filteredLogs.length;
+  const totalInput = filteredLogs.reduce((sum, l) => sum + (l.tokens_input || 0), 0);
+  const totalOutput = filteredLogs.reduce((sum, l) => sum + (l.tokens_output || 0), 0);
   const totalTokens = totalInput + totalOutput;
-  const uniqueUsers = new Set(logs.map((l) => l.user_id)).size;
-  const totalSfQueries = logs.reduce((sum, l) => sum + (l.snowflake_queries || 0), 0);
+  const uniqueUsers = new Set(filteredLogs.map((l) => l.user_id)).size;
+  const totalSfQueries = filteredLogs.reduce((sum, l) => sum + (l.snowflake_queries || 0), 0);
   const anthropicCost = estimateCost(0, { inputTokens: totalInput, outputTokens: totalOutput });
   const sfCost = estimateSnowflakeCost(totalSfQueries);
 
   const rangeLabel = activePreset ? `last ${activePreset}` : `${dateFrom} — ${dateTo}`;
+  const tenantLabel = selectedTenant === 'all' ? 'all tenants' : (tenantMap[selectedTenant] || 'Unknown');
 
   if (loading) {
     return (
@@ -162,11 +177,21 @@ export default function PlatformUsagePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-dark-text">Usage Dashboard</h1>
-        <p className="text-sm text-secondary-text mt-1">Agent usage across all tenants ({rangeLabel})</p>
+        <p className="text-sm text-secondary-text mt-1">Agent usage across {tenantLabel} ({rangeLabel})</p>
       </div>
 
-      {/* Date range picker */}
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={selectedTenant}
+          onChange={(e) => setSelectedTenant(e.target.value)}
+          className="border border-gray-200 rounded-md px-2 py-1.5 text-xs bg-white"
+        >
+          <option value="all">All Tenants</option>
+          {tenantOptions.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
         <div className="flex gap-1">
           {PRESETS.map((p) => (
             <button
