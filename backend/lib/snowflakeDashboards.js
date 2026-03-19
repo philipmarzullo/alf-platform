@@ -1,5 +1,5 @@
 /**
- * Snowflake-direct dashboard queries for QBU domains.
+ * Snowflake-direct dashboard queries for QBU domains (v2).
  *
  * These run live against Wavelytics views (not synced sf_* tables).
  * Each function connects via SnowflakeConnector.queryView() and returns
