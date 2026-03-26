@@ -9,15 +9,16 @@ import { createClient } from '@supabase/supabase-js';
  * It connects to ALF_AAEFS.WAREHOUSE for the WinTeam ingestion pipeline.
  *
  * Credentials are stored in alf_platform_credentials with
- * service_type = 'snowflake_alf'. The stored JSON blob shape:
+ * service_type = 'snowflake_alf'. Uses key-pair auth (same as Wavelytics
+ * connector) to bypass MFA. The stored JSON blob shape:
  * {
- *   "account":   "ylnlssy-ik29268",
- *   "username":  "ALF_SERVICE",
- *   "password":  "<password>",
- *   "database":  "ALF_AAEFS",
- *   "schema":    "WAREHOUSE",
- *   "role":      "ALF_SERVICE_ROLE",
- *   "warehouse": "COMPUTE_WH"
+ *   "account":    "ylnlssy-alf_production",
+ *   "username":   "ALF_SERVICE",
+ *   "privateKey": "-----BEGIN PRIVATE KEY-----\n...",
+ *   "database":   "ALF_AAEFS",
+ *   "schema":     "WAREHOUSE",
+ *   "role":       "ALF_SERVICE_ROLE",
+ *   "warehouse":  "COMPUTE_WH"
  * }
  */
 
@@ -57,8 +58,11 @@ async function resolveCredentials() {
   const json = decryptCredential(data.encrypted_key);
   const creds = JSON.parse(json);
 
-  // Validate required fields
-  for (const field of ['account', 'username', 'password', 'warehouse']) {
+  // Validate required fields — key-pair auth uses privateKey, legacy uses password
+  const hasKeyPair = !!creds.privateKey;
+  const required = ['account', 'username', 'warehouse'];
+  if (!hasKeyPair) required.push('password');
+  for (const field of required) {
     if (!creds[field]) {
       throw new Error(`snowflake_alf credential missing required field: ${field}`);
     }
@@ -78,16 +82,23 @@ export default class SnowflakeAlfConnector {
   async connect() {
     this.creds = await resolveCredentials();
 
+    const hasKeyPair = !!this.creds.privateKey;
     const connOpts = {
       account: this.creds.account,
       username: this.creds.username,
-      password: this.creds.password,
       database: this.creds.database || 'ALF_AAEFS',
       schema: this.creds.schema || 'WAREHOUSE',
       warehouse: this.creds.warehouse,
       role: this.creds.role || 'ALF_SERVICE_ROLE',
       application: 'Alf_Ingestion',
+      authenticator: hasKeyPair ? 'SNOWFLAKE_JWT' : 'SNOWFLAKE',
     };
+
+    if (hasKeyPair) {
+      connOpts.privateKey = this.creds.privateKey;
+    } else {
+      connOpts.password = this.creds.password;
+    }
 
     this.connection = snowflake.createConnection(connOpts);
 
