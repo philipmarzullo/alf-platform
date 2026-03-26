@@ -152,6 +152,48 @@ router.get('/:tenantId/logs', requireTenantAccess, async (req, res) => {
   }
 });
 
+// ─── GET /:tenantId/jobs — Jobs from ALF_AAEFS.WAREHOUSE.DIM_JOB ─────────
+
+router.get('/:tenantId/jobs', requireTenantAccess, async (req, res) => {
+  let connector;
+  try {
+    connector = new SnowflakeAlfConnector();
+    await connector.connect();
+    const rows = await connector.fetchJobs();
+
+    // Snowflake returns UPPER_CASE keys — normalize to snake_case
+    let lastLoadedAt = null;
+    const jobs = rows.map(r => {
+      const loadedAt = r._LOADED_AT || r._loaded_at;
+      if (loadedAt && (!lastLoadedAt || loadedAt > lastLoadedAt)) lastLoadedAt = loadedAt;
+      const status = String(r.JOB_STATUS ?? r.Job_Status ?? '');
+      return {
+        job_number: r.JOB_NUMBER ?? r.Job_Number,
+        job_name: r.JOB_NAME ?? r.Job_Name,
+        job_status: status === '1' ? 'Active' : status === '0' ? 'Inactive' : status,
+        company_name: r.COMPANY_NAME ?? r.Company_Name,
+        region: r.TIER_1 ?? r.Tier_1,
+        manager: r.TIER_3 ?? r.Tier_3,
+        vp: r.TIER_8 ?? r.Tier_8,
+        supervisor: r.SUPERVISOR_DESCRIPTION ?? r.Supervisor_Description,
+        city: r.CITY ?? r.City,
+        state: r.STATE ?? r.State,
+      };
+    });
+
+    res.json({
+      count: jobs.length,
+      last_loaded_at: lastLoadedAt,
+      jobs,
+    });
+  } catch (err) {
+    console.error('[ingestion] Jobs error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch jobs', details: err.message });
+  } finally {
+    if (connector) await connector.disconnect();
+  }
+});
+
 // ─── GET /:tenantId/configs — Active ingestion configs ──────────────────
 
 router.get('/:tenantId/configs', requireTenantAccess, async (req, res) => {

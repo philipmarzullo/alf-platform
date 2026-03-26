@@ -130,6 +130,28 @@ export default class SnowflakeAlfConnector {
     }
   }
 
+  /**
+   * Fetch jobs from ALF_AAEFS.WAREHOUSE.DIM_JOB.
+   * Returns all jobs (active + inactive) with the last load timestamp.
+   */
+  async fetchJobs(limit = 15000) {
+    const db = this.creds?.database || 'ALF_AAEFS';
+    const schema = this.creds?.schema || 'WAREHOUSE';
+    const rows = await this.execute(`
+      SELECT
+        Job_Number, Job_Name, Job_Status,
+        Company_Name,
+        Tier_1, Tier_3, Tier_8,
+        Supervisor_Description,
+        City, State,
+        _loaded_at
+      FROM ${db}.${schema}.DIM_JOB
+      ORDER BY Job_Name
+      LIMIT ?
+    `, [limit]);
+    return rows;
+  }
+
   async testConnection() {
     try {
       await this.connect();
