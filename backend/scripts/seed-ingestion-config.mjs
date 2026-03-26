@@ -21,7 +21,7 @@ async function main() {
   // 1. Find A&A tenant
   const { data: tenant, error: tenantErr } = await supabase
     .from('alf_tenants')
-    .select('id, name, slug')
+    .select('id, company_name, slug')
     .eq('slug', 'aaefs')
     .single();
 
@@ -30,7 +30,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Found tenant: ${tenant.name} (${tenant.id})`);
+  console.log(`Found tenant: ${tenant.company_name} (${tenant.id})`);
 
   // 2. Upsert DIM_JOB ingestion config
   const config = {
