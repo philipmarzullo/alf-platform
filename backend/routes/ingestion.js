@@ -187,7 +187,7 @@ router.get('/:tenantId/jobs', requireTenantAccess, async (req, res) => {
       jobs,
     });
   } catch (err) {
-    console.error('[ingestion] Jobs error:', err.message);
+    console.error('[ingestion] Jobs error:', err.message, err.stack?.split('\n')[1]);
     res.status(500).json({ error: 'Failed to fetch jobs', details: err.message });
   } finally {
     if (connector) await connector.disconnect();
