@@ -36,6 +36,7 @@ import qbrTemplatesRouter from './routes/qbrTemplates.js';
 import unionBenefitsRouter from './routes/unionBenefits.js';
 import schemaProfileRouter, { handleSchemaProfileRefresh } from './routes/schemaProfile.js';
 import ingestionRouter from './routes/ingestion.js';
+import rfpRouter from './routes/rfp.js';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -129,6 +130,7 @@ app.use('/api/qbr-templates', auth, qbrTemplatesRouter);
 app.use('/api/union-benefits', auth, unionBenefitsRouter);
 app.use('/api/schema-profile', auth, schemaProfileRouter);
 app.use('/api/ingestion', auth, ingestionRouter);
+app.use('/api/rfp', auth, rfpRouter);
 
 // --- 404 ---
 app.use((req, res) => {

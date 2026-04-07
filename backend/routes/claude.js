@@ -210,15 +210,45 @@ async function getKnowledgeContext(supabase, tenantId, agentKey, userMessage) {
     }
   }
 
-  // Inject RFP Q&A library for the rfp_builder agent
+  // Inject RFP Q&A library + verified facts for the rfp_builder agent
   if (agentKey === 'rfp_builder') {
-    const { data: qaEntries } = await supabase
-      .from('tenant_rfp_answers')
-      .select('question, answer, category, tags, win_count, use_count')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .order('win_count', { ascending: false })
-      .limit(50);
+    const [qaRes, factsRes] = await Promise.all([
+      supabase
+        .from('tenant_rfp_answers')
+        .select('question, answer, category, tags, win_count, use_count')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .order('win_count', { ascending: false })
+        .limit(50),
+      supabase
+        .from('tenant_rfp_facts')
+        .select('fact_key, fact_value, category, source')
+        .eq('tenant_id', tenantId),
+    ]);
+
+    const qaEntries = qaRes.data;
+    const factEntries = factsRes.data;
+
+    // Inject verified facts FIRST so the agent treats them as ground truth
+    if (factEntries?.length) {
+      const filled = factEntries.filter(f => f.fact_value && String(f.fact_value).trim());
+      if (filled.length) {
+        // Group by category for readability
+        const grouped = {};
+        for (const f of filled) {
+          if (!grouped[f.category]) grouped[f.category] = [];
+          grouped[f.category].push(f);
+        }
+        const blocks = Object.entries(grouped).map(([cat, rows]) => {
+          const lines = rows.map(r => `  ${r.fact_key} = ${r.fact_value}`).join('\n');
+          return `[${cat}]\n${lines}`;
+        });
+        context += '\n\n=== RFP VERIFIED FACTS ===\n';
+        context += 'The following are tenant-verified facts. Treat them as ground truth — never invent values that contradict them. If a question requires a fact NOT in this list, mark the item as needs_data rather than guessing.\n\n';
+        context += blocks.join('\n\n');
+        console.log(`[claude] Injected ${filled.length} RFP facts for rfp_builder`);
+      }
+    }
 
     if (qaEntries?.length) {
       context += '\n\n=== RFP Q&A LIBRARY ===\n';
