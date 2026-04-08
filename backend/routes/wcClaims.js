@@ -211,6 +211,35 @@ router.get('/summary', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
+// GET /api/wc-claims/lifetime — historical "Since 2008" rollup
+// Returns the wc_claims_lifetime_summary row for the tenant, or an empty
+// shape if no row has been seeded. This is static aggregate data parsed from
+// the historical dashboard report — not derived from wc_claims rows.
+// ----------------------------------------------------------------------------
+router.get('/lifetime', async (req, res) => {
+  const tenantId = resolveTenant(req);
+  if (!tenantId) return res.status(400).json({ error: 'No tenant context' });
+
+  try {
+    const { data, error } = await req.supabase
+      .from('wc_claims_lifetime_summary')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      return res.json({ summary: null });
+    }
+    res.json({ summary: data });
+  } catch (err) {
+    console.error('[wc-claims] Lifetime error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch lifetime summary' });
+  }
+});
+
+// ----------------------------------------------------------------------------
 // GET /api/wc-claims/:claimId — single claim full detail
 // ----------------------------------------------------------------------------
 router.get('/:claimId', async (req, res) => {
