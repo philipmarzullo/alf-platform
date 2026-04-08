@@ -37,6 +37,7 @@ import unionBenefitsRouter from './routes/unionBenefits.js';
 import schemaProfileRouter, { handleSchemaProfileRefresh } from './routes/schemaProfile.js';
 import ingestionRouter from './routes/ingestion.js';
 import rfpRouter from './routes/rfp.js';
+import wcClaimsRouter from './routes/wcClaims.js';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -131,6 +132,7 @@ app.use('/api/union-benefits', auth, unionBenefitsRouter);
 app.use('/api/schema-profile', auth, schemaProfileRouter);
 app.use('/api/ingestion', auth, ingestionRouter);
 app.use('/api/rfp', auth, rfpRouter);
+app.use('/api/wc-claims', auth, wcClaimsRouter);
 
 // --- 404 ---
 app.use((req, res) => {
