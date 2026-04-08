@@ -27,6 +27,7 @@ import { createClient } from '@supabase/supabase-js';
 import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
+import { enrichWcClaimsFromSnowflake } from './enrich-wc-claims-snowflake.mjs';
 
 // A&A tenant — hardcoded per Philip. If you need to seed a different tenant,
 // override via the AA_TENANT_ID env var.
@@ -393,6 +394,20 @@ async function main() {
   const totalIncurred = rows.reduce((s, r) => s + (r.total_incurred || 0), 0);
   console.log(`  Status: ${open} open | ${closed} closed | ${nr} non-reportable`);
   console.log(`  Total incurred: $${totalIncurred.toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+
+  // Enrich job_name + vp from Snowflake DIM_JOB so the dashboard renders the
+  // authoritative WinTeam values rather than whatever Liberty/the tracker had.
+  // Skip if SKIP_SNOWFLAKE_ENRICH=1 is set (useful when SF creds aren't local).
+  if (process.env.SKIP_SNOWFLAKE_ENRICH === '1') {
+    console.log('  Skipping Snowflake enrichment (SKIP_SNOWFLAKE_ENRICH=1)');
+    return;
+  }
+  console.log('\n[seed-wc-claims] Running Snowflake enrichment…');
+  try {
+    await enrichWcClaimsFromSnowflake();
+  } catch (e) {
+    console.error('  Snowflake enrichment failed (data is still seeded):', e.message);
+  }
 }
 
 main().catch(err => {
