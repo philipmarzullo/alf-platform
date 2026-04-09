@@ -282,6 +282,12 @@ router.get('/lifetime', async (req, res) => {
 // Triggers WinTeam timekeeping validation for the tenant's open claims.
 // Pulls last-14d clock-in data from Snowflake live, classifies each open
 // claim, and writes the wt_* fields back to wc_claims. Returns counts.
+//
+// Body params:
+//   max_age_minutes — if the most recent validation is younger than this,
+//                     skip the Snowflake query and return immediately. Used
+//                     by page-load auto-refresh to dedup concurrent users.
+//                     Explicit button clicks should omit / pass 0.
 // ----------------------------------------------------------------------------
 router.post('/validate-work-status', async (req, res) => {
   const tenantId = resolveTenant(req);
@@ -290,8 +296,10 @@ router.post('/validate-work-status', async (req, res) => {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
+  const maxAgeMinutes = Number(req.body?.max_age_minutes ?? 0) || 0;
+
   try {
-    const summary = await validateWcClaimsWorkStatus({ tenantId });
+    const summary = await validateWcClaimsWorkStatus({ tenantId, maxAgeMinutes });
     res.json(summary);
   } catch (err) {
     console.error('[wc-claims] Validate error:', err.message);

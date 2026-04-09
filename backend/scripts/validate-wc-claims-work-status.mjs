@@ -104,10 +104,48 @@ function classify(workStatus, hours) {
   return 'confirmed';
 }
 
-export async function validateWcClaimsWorkStatus({ tenantId = AA_TENANT_ID } = {}) {
+export async function validateWcClaimsWorkStatus({ tenantId = AA_TENANT_ID, maxAgeMinutes = 0 } = {}) {
   const startedAt = Date.now();
   console.log('[validate-wc-claims] Starting…');
   console.log(`  Tenant: ${tenantId}`);
+
+  // ── 0. Dedup guard ──────────────────────────────────────────────────────
+  // When maxAgeMinutes > 0, short-circuit if any open claim was validated
+  // within the window. This prevents thundering-herd Snowflake queries when
+  // multiple users land on Claim Tracker at once. Button clicks pass 0 to
+  // always force a fresh run.
+  if (maxAgeMinutes > 0) {
+    const { data: fresh, error: freshErr } = await supabase
+      .from('wc_claims')
+      .select('wt_validation_checked_at')
+      .eq('tenant_id', tenantId)
+      .eq('claim_status', 'Open')
+      .not('wt_validation_checked_at', 'is', null)
+      .order('wt_validation_checked_at', { ascending: false })
+      .limit(1);
+    if (!freshErr) {
+      const latest = fresh?.[0]?.wt_validation_checked_at;
+      if (latest && (Date.now() - new Date(latest).getTime()) < maxAgeMinutes * 60_000) {
+        const ageMs = Date.now() - new Date(latest).getTime();
+        console.log(
+          `[validate-wc-claims] Skipped — last run was ${Math.round(ageMs / 1000)}s ago ` +
+          `(< ${maxAgeMinutes} min window)`
+        );
+        return {
+          skipped: true,
+          reason: 'fresh',
+          last_checked_at: latest,
+          checked: 0,
+          confirmed: 0,
+          mismatched: 0,
+          no_data: 0,
+          applied: 0,
+          failed: 0,
+          duration_ms: Date.now() - startedAt,
+        };
+      }
+    }
+  }
 
   // ── 1. Fetch open claims with an employee_id ────────────────────────────
   const { data: claims, error: claimsErr } = await supabase
@@ -289,6 +327,7 @@ export async function validateWcClaimsWorkStatus({ tenantId = AA_TENANT_ID } = {
   if (failed > 0) console.warn(`  ${failed} updates failed`);
 
   return {
+    skipped: false,
     checked: stats.checked,
     confirmed: stats.confirmed,
     mismatched: stats.mismatched,
