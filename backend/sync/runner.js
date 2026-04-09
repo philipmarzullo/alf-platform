@@ -1,5 +1,5 @@
 import { getSyncOrder, getTableSchema } from './tableSchemas.js';
-import { upsertTable } from './upserter.js';
+import { upsertTable, upsertTableStream } from './upserter.js';
 import FileUploadConnector from './connectors/FileUploadConnector.js';
 import SnowflakeConnector from './connectors/SnowflakeConnector.js';
 import SqlConnector from './connectors/SqlConnector.js';
@@ -124,16 +124,25 @@ export async function runSync(supabase, syncConfig, options = {}) {
       : tablesToSync;
 
     // 8. Fetch and upsert each table in sync order
+    // Connectors that implement fetchTableBatched (Snowflake) get the
+    // streaming path so large fact tables don't OOM. Others fall back to
+    // the classic buffered path.
+    const supportsStreaming = typeof connector.fetchTableBatched === 'function';
+
     for (const table of effectiveTables) {
       let rows = null;
       try {
-        rows = await fetchWithRetry(connector, table);
-        if (rows.length === 0) {
-          rowCounts[table] = { fetched: 0, upserted: 0, skipped: 0 };
-          continue;
+        let result;
+        if (supportsStreaming) {
+          result = await upsertTableStream(supabase, tenantId, table, connector);
+        } else {
+          rows = await fetchWithRetry(connector, table);
+          if (rows.length === 0) {
+            rowCounts[table] = { fetched: 0, upserted: 0, skipped: 0 };
+            continue;
+          }
+          result = await upsertTable(supabase, tenantId, table, rows);
         }
-
-        const result = await upsertTable(supabase, tenantId, table, rows);
         rowCounts[table] = result;
 
         if (result.errors.length > 0) {
@@ -143,9 +152,8 @@ export async function runSync(supabase, syncConfig, options = {}) {
         errors.push({ table, error: err.message });
         rowCounts[table] = { fetched: 0, upserted: 0, error: err.message };
       } finally {
-        // Release the in-memory row buffer before starting the next table so
-        // the GC can reclaim memory between large fact tables (FACT_TIMEKEEPING
-        // etc.). Prevents heap buildup when syncing many tables in sequence.
+        // Release the buffered rows reference (classic path only) so the
+        // GC can reclaim memory before starting the next table.
         rows = null;
       }
     }

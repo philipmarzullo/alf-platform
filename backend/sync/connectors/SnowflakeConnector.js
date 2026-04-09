@@ -221,6 +221,27 @@ export default class SnowflakeConnector extends BaseConnector {
   }
 
   async fetchTable(targetTable) {
+    // Thin wrapper that buffers a batched fetch into a single array. Kept
+    // for backwards compatibility with non-streaming call sites. New code
+    // (see runner.js) should prefer fetchTableBatched so rows never
+    // accumulate in memory.
+    const all = [];
+    await this.fetchTableBatched(targetTable, async (batch) => {
+      for (const row of batch) all.push(row);
+    }, { batchSize: 1000 });
+    return all;
+  }
+
+  /**
+   * Memory-efficient streaming fetch. Streams rows from Snowflake and
+   * invokes `onBatch(batch)` with every `batchSize` rows (plus a final
+   * partial batch at end-of-stream). The stream is paused while `onBatch`
+   * runs so downstream upserts apply back-pressure to the Snowflake SDK
+   * and peak memory stays at O(batchSize) regardless of table size.
+   *
+   * Resolves with the total row count after the final batch is processed.
+   */
+  async fetchTableBatched(targetTable, onBatch, { batchSize = 500 } = {}) {
     if (!this.connection) throw new Error('Not connected');
 
     const queryTemplate = this.queryMap?.[targetTable];
@@ -228,11 +249,6 @@ export default class SnowflakeConnector extends BaseConnector {
       throw new Error(`No Snowflake query mapped for table: ${targetTable}`);
     }
 
-    // Stream the result set instead of buffering it all via the `complete`
-    // callback. The buffered path allocates the full row array twice (once
-    // inside the SDK, once via .map() normalization), which OOMs on large
-    // fact tables. With streamResult:true we normalize each row as it
-    // arrives and the raw row drops out of scope immediately.
     return await new Promise((resolve, reject) => {
       this.connection.execute({
         sqlText: queryTemplate,
@@ -244,20 +260,54 @@ export default class SnowflakeConnector extends BaseConnector {
             return;
           }
 
-          const out = [];
           const stream = stmt.streamRows();
+          let batch = [];
+          let total = 0;
+          let failed = false;
+
+          const flush = async () => {
+            if (batch.length === 0) return;
+            const toProcess = batch;
+            batch = [];
+            await onBatch(toProcess);
+          };
 
           stream.on('data', (row) => {
+            if (failed) return;
             const normalized = {};
             for (const key in row) {
               normalized[key.toLowerCase()] = row[key];
             }
-            out.push(normalized);
+            batch.push(normalized);
+            total += 1;
+
+            if (batch.length >= batchSize) {
+              stream.pause();
+              flush()
+                .then(() => {
+                  if (!failed) stream.resume();
+                })
+                .catch((batchErr) => {
+                  failed = true;
+                  stream.destroy();
+                  reject(batchErr);
+                });
+            }
           });
 
-          stream.on('end', () => resolve(out));
+          stream.on('end', async () => {
+            if (failed) return;
+            try {
+              await flush();
+              resolve(total);
+            } catch (flushErr) {
+              reject(flushErr);
+            }
+          });
 
           stream.on('error', (streamErr) => {
+            if (failed) return;
+            failed = true;
             reject(new Error(`Snowflake stream error (${targetTable}): ${streamErr.message}`));
           });
         },

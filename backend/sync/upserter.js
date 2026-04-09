@@ -1,6 +1,7 @@
 import { getTableSchema } from './tableSchemas.js';
 
 const BATCH_SIZE = 500;
+const MAX_ERRORS_STORED = 100;
 
 /**
  * Upsert rows into an sf_* table, scoped to a single tenant.
@@ -47,6 +48,87 @@ export async function upsertTable(supabase, tenantId, table, rows) {
     // No natural key (work_tickets, timekeeping): delete tenant rows, batch insert
     result.upserted = await deleteAndInsert(supabase, tenantId, table, validRows);
   }
+
+  return result;
+}
+
+/**
+ * Streaming variant of upsertTable that pulls rows from a connector in
+ * batches and transforms/upserts them without ever holding the full table
+ * in memory. Used by the runner for Snowflake (large fact tables like
+ * FACT_TIMEKEEPING would OOM with the buffered path).
+ *
+ * The connector must implement `fetchTableBatched(table, onBatch, opts)`.
+ *
+ * Design notes:
+ *   - FK caches are built once up front from Supabase state (dims were
+ *     synced earlier in sync order) and reused for every batch.
+ *   - For tables without a natural key we delete all tenant rows once up
+ *     front, then insert streaming batches.
+ *   - ensureDates runs per-batch; it's idempotent so re-calling is safe.
+ *   - result.errors is capped at MAX_ERRORS_STORED and omits the raw row
+ *     payload so a large table full of FK failures can't blow the heap.
+ */
+export async function upsertTableStream(supabase, tenantId, table, connector, { batchSize = BATCH_SIZE } = {}) {
+  const schema = getTableSchema(table);
+  const result = { fetched: 0, upserted: 0, skipped: 0, errors: [] };
+
+  const fkCaches = await buildFkCaches(supabase, tenantId, schema);
+
+  // For tables without a natural key we delete once up front, then stream
+  // inserts in batches. The old deleteAndInsert path did this atomically;
+  // here we trade atomicity for bounded memory.
+  if (!schema.naturalKey) {
+    const { error: delError } = await supabase
+      .from(table)
+      .delete()
+      .eq('tenant_id', tenantId);
+    if (delError) {
+      throw new Error(`Delete before insert failed on ${table}: ${delError.message}`);
+    }
+  }
+
+  const onConflict = schema.naturalKey ? schema.naturalKey.join(',') : null;
+
+  const total = await connector.fetchTableBatched(table, async (batch) => {
+    result.fetched += batch.length;
+
+    if (schema.fks.date_key) {
+      await ensureDates(supabase, batch);
+    }
+
+    // Transform in place: write the transformed row back into the same
+    // slot, advance a write cursor, then truncate to drop skipped rows.
+    // This keeps peak memory at ~1x batch size instead of 2x.
+    let writeIdx = 0;
+    for (let i = 0; i < batch.length; i++) {
+      try {
+        batch[writeIdx++] = transformRow(row(batch[i]), tenantId, schema, fkCaches);
+      } catch (err) {
+        result.skipped++;
+        if (result.errors.length < MAX_ERRORS_STORED) {
+          result.errors.push({ error: err.message });
+        }
+      }
+    }
+    batch.length = writeIdx;
+
+    if (batch.length === 0) return;
+
+    const { error: opError } = schema.naturalKey
+      ? await supabase.from(table).upsert(batch, { onConflict })
+      : await supabase.from(table).insert(batch);
+
+    if (opError) {
+      throw new Error(`Batch ${schema.naturalKey ? 'upsert' : 'insert'} failed on ${table}: ${opError.message}`);
+    }
+
+    result.upserted += batch.length;
+  }, { batchSize });
+
+  // total is the raw count emitted by the connector; result.fetched should
+  // match it. Trust the connector's count as the authoritative total.
+  if (typeof total === 'number') result.fetched = total;
 
   return result;
 }
