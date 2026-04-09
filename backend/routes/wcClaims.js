@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
   if (!tenantId) return res.status(400).json({ error: 'No tenant context' });
 
   const {
-    status, vp, state, year, job_number, injury_cause, search,
+    status, vp, state, year, job_number, injury_cause, search, recordable,
     page = '1', limit = '50',
   } = req.query;
 
@@ -45,10 +45,15 @@ router.get('/', async (req, res) => {
 
     if (status) {
       const statuses = String(status).split(',').map(s => s.trim());
-      // Tolerant matching: accept "open"/"Open"/"OPEN"
-      query = query.in('claim_status', statuses.map(s =>
-        s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
-      ));
+      // Tolerant matching: accept "open"/"Open"/"OPEN", "non-reportable"/"Non-Reportable"
+      const normalize = s => s.split('-').map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join('-');
+      query = query.in('claim_status', statuses.map(normalize));
+    }
+    // Recordable toggle: 'true' = Liberty-tracked claims, 'false' = non-reportable only
+    if (recordable === 'true') {
+      query = query.in('claim_status', ['Open', 'Closed']);
+    } else if (recordable === 'false') {
+      query = query.eq('claim_status', 'Non-Reportable');
     }
     if (vp) query = query.eq('vp', vp);
     if (state) query = query.eq('accident_state', state);
@@ -84,30 +89,51 @@ router.get('/', async (req, res) => {
 
 // ----------------------------------------------------------------------------
 // GET /api/wc-claims/summary — KPI rollup for the dashboard
-// Optional filters: vp, state, year, dateFrom, dateTo
+// Optional filters: vp, state, year, dateFrom, dateTo, recordable
+//   recordable=true   → only Open + Closed (Liberty-tracked claims)
+//   recordable=false  → only Non-Reportable
+//   recordable=any    → no status filter (default)
+// Filter dropdown values are computed from the UNFILTERED tenant set so that
+// applying a year filter doesn't collapse the year dropdown to one option.
 // ----------------------------------------------------------------------------
 router.get('/summary', async (req, res) => {
   const tenantId = resolveTenant(req);
   if (!tenantId) return res.status(400).json({ error: 'No tenant context' });
 
-  const { vp, state, year, dateFrom, dateTo } = req.query;
+  const { vp, state, year, dateFrom, dateTo, recordable } = req.query;
 
   try {
-    let query = req.supabase
+    // Pull every claim for the tenant once. We compute filter dropdown values
+    // off this full set, then apply filters in JS for the KPIs/charts. The
+    // table is small enough (a few hundred rows max) that this is cheaper
+    // than two round-trips.
+    const { data: claims, error } = await req.supabase
       .from('wc_claims')
       .select('*')
       .eq('tenant_id', tenantId);
-
-    if (vp) query = query.eq('vp', vp);
-    if (state) query = query.eq('accident_state', state);
-    if (year) query = query.eq('loss_year', parseInt(year, 10));
-    if (dateFrom) query = query.gte('date_of_loss', dateFrom);
-    if (dateTo) query = query.lte('date_of_loss', dateTo);
-
-    const { data: claims, error } = await query;
     if (error) throw error;
 
-    const all = claims || [];
+    const allClaims = claims || [];
+
+    // Filter dropdown values from the full unfiltered set
+    const vpValues = [...new Set(allClaims.map(c => c.vp).filter(Boolean))].sort();
+    const stateValues = [...new Set(allClaims.map(c => c.accident_state).filter(Boolean))].sort();
+    const yearValues = [...new Set(allClaims.map(c => c.loss_year).filter(Boolean))].sort((a, b) => b - a);
+
+    // Apply filters in JS
+    const yearInt = year != null && year !== '' ? parseInt(year, 10) : null;
+    const filtered = allClaims.filter(c => {
+      if (vp && c.vp !== vp) return false;
+      if (state && c.accident_state !== state) return false;
+      if (yearInt != null && c.loss_year !== yearInt) return false;
+      if (dateFrom && (!c.date_of_loss || c.date_of_loss < dateFrom)) return false;
+      if (dateTo && (!c.date_of_loss || c.date_of_loss > dateTo)) return false;
+      if (recordable === 'true' && c.claim_status === 'Non-Reportable') return false;
+      if (recordable === 'false' && c.claim_status !== 'Non-Reportable') return false;
+      return true;
+    });
+
+    const all = filtered;
     const open = all.filter(c => c.claim_status === 'Open');
     const closed = all.filter(c => c.claim_status === 'Closed');
     const nr = all.filter(c => c.claim_status === 'Non-Reportable');
@@ -124,17 +150,25 @@ router.get('/summary', async (req, res) => {
       return s.includes('full duty') || s.includes('returned');
     }).length;
 
+    // Liberty-tracked totals (recordable claims)
     const totalIncurred = all.reduce((s, c) => s + Number(c.total_incurred || 0), 0);
     const totalPaid = all.reduce((s, c) => s + Number(c.total_paid || 0), 0);
     const outstandingReserve = all.reduce((s, c) => s + Number(c.outstanding_reserve || 0), 0);
 
-    // Group by year
+    // Manual cost totals (non-reportable, urgent care, etc.)
+    const totalManualCost = all.reduce((s, c) => s + Number(c.manual_cost || 0), 0);
+    const nrCount = nr.length;
+    const avgManualCost = nrCount > 0 ? totalManualCost / nrCount : 0;
+    const currentYear = new Date().getFullYear();
+    const ytdNrCount = nr.filter(c => c.loss_year === currentYear).length;
+
+    // Group by year — use whichever cost is relevant for the row
     const byYearMap = {};
     for (const c of all) {
       const y = c.loss_year || 'Unknown';
       if (!byYearMap[y]) byYearMap[y] = { year: y, count: 0, incurred: 0 };
       byYearMap[y].count += 1;
-      byYearMap[y].incurred += Number(c.total_incurred || 0);
+      byYearMap[y].incurred += Number(c.total_incurred || 0) + Number(c.manual_cost || 0);
     }
     const claimsByYear = Object.values(byYearMap)
       .filter(r => r.year !== 'Unknown')
@@ -146,7 +180,7 @@ router.get('/summary', async (req, res) => {
       const job = c.job_name || 'Unknown';
       if (!bySiteMap[job]) bySiteMap[job] = { job_name: job, count: 0, incurred: 0 };
       bySiteMap[job].count += 1;
-      bySiteMap[job].incurred += Number(c.total_incurred || 0);
+      bySiteMap[job].incurred += Number(c.total_incurred || 0) + Number(c.manual_cost || 0);
     }
     const topSites = Object.values(bySiteMap)
       .sort((a, b) => b.count - a.count)
@@ -163,9 +197,13 @@ router.get('/summary', async (req, res) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Top cost claims
+    // Top cost claims — combined Liberty + manual cost
     const topCostClaims = [...all]
-      .sort((a, b) => Number(b.total_incurred || 0) - Number(a.total_incurred || 0))
+      .sort((a, b) => {
+        const av = Number(b.total_incurred || 0) + Number(b.manual_cost || 0);
+        const bv = Number(a.total_incurred || 0) + Number(a.manual_cost || 0);
+        return av - bv;
+      })
       .slice(0, 10)
       .map(c => ({
         id: c.id,
@@ -174,25 +212,24 @@ router.get('/summary', async (req, res) => {
         job_name: c.job_name,
         nature_of_injury: c.nature_of_injury,
         total_incurred: Number(c.total_incurred || 0),
+        manual_cost: Number(c.manual_cost || 0),
       }));
-
-    // Filter values for dropdowns
-    const vpValues = [...new Set(all.map(c => c.vp).filter(Boolean))].sort();
-    const stateValues = [...new Set(all.map(c => c.accident_state).filter(Boolean))].sort();
-    const yearValues = [...new Set(all.map(c => c.loss_year).filter(Boolean))].sort((a, b) => b - a);
 
     res.json({
       kpis: {
         total_claims: all.length,
         open_count: open.length,
         closed_count: closed.length,
-        non_reportable_count: nr.length,
+        non_reportable_count: nrCount,
         oow_count: oowCount,
         light_duty_count: lightDutyCount,
         full_duty_count: fullDutyCount,
         total_incurred: totalIncurred,
         total_paid: totalPaid,
         outstanding_reserve: outstandingReserve,
+        total_manual_cost: totalManualCost,
+        avg_manual_cost: avgManualCost,
+        ytd_nr_count: ytdNrCount,
       },
       claimsByYear,
       topSites,
