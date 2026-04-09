@@ -11,6 +11,7 @@ COPY middleware/ ./middleware/
 COPY lib/ ./lib/
 COPY data/ ./data/
 COPY sync/ ./sync/
+COPY scripts/ ./scripts/
 
 EXPOSE 3001
 
