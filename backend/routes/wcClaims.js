@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { Router } from 'express';
+import { validateWcClaimsWorkStatus } from '../scripts/validate-wc-claims-work-status.mjs';
 
 const router = Router();
 
@@ -273,6 +274,28 @@ router.get('/lifetime', async (req, res) => {
   } catch (err) {
     console.error('[wc-claims] Lifetime error:', err.message);
     res.status(500).json({ error: 'Failed to fetch lifetime summary' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// POST /api/wc-claims/validate-work-status — admin-only
+// Triggers WinTeam timekeeping validation for the tenant's open claims.
+// Pulls last-14d clock-in data from Snowflake live, classifies each open
+// claim, and writes the wt_* fields back to wc_claims. Returns counts.
+// ----------------------------------------------------------------------------
+router.post('/validate-work-status', async (req, res) => {
+  const tenantId = resolveTenant(req);
+  if (!tenantId) return res.status(400).json({ error: 'No tenant context' });
+  if (!ADMIN_ROLES.includes(req.user?.role)) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  try {
+    const summary = await validateWcClaimsWorkStatus({ tenantId });
+    res.json(summary);
+  } catch (err) {
+    console.error('[wc-claims] Validate error:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to validate work status' });
   }
 });
 
