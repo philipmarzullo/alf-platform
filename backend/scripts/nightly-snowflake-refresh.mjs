@@ -25,10 +25,14 @@
 //   Runtime:       Node
 //   Schedule:      0 8 * * *          # 08:00 UTC / 04:00 EDT / 03:00 EST
 //   Build cmd:     cd backend && npm install
-//   Start cmd:     cd backend && node scripts/nightly-snowflake-refresh.mjs
+//   Start cmd:     cd backend && node --max-old-space-size=1536 scripts/nightly-snowflake-refresh.mjs
 //   Env vars:      inherit from alf-backend env group
 //                  (SUPABASE_URL, SUPABASE_SERVICE_KEY,
 //                   CREDENTIAL_ENCRYPTION_KEY, etc.)
+//
+//   The --max-old-space-size flag gives Node room to hold a FACT_TIMEKEEPING-
+//   sized result set in memory while upserting. Keep it below the Render
+//   cron's container RAM ceiling to avoid OS OOM kills.
 //
 // Run locally:
 //   cd backend && node scripts/nightly-snowflake-refresh.mjs

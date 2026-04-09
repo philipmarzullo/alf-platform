@@ -228,18 +228,41 @@ export default class SnowflakeConnector extends BaseConnector {
       throw new Error(`No Snowflake query mapped for table: ${targetTable}`);
     }
 
-    const rows = await new Promise((resolve, reject) => {
+    // Stream the result set instead of buffering it all via the `complete`
+    // callback. The buffered path allocates the full row array twice (once
+    // inside the SDK, once via .map() normalization), which OOMs on large
+    // fact tables. With streamResult:true we normalize each row as it
+    // arrives and the raw row drops out of scope immediately.
+    return await new Promise((resolve, reject) => {
       this.connection.execute({
         sqlText: queryTemplate,
         binds: [this.config.company_filter],
-        complete: (err, stmt, rows) => {
-          if (err) reject(new Error(`Snowflake query failed (${targetTable}): ${err.message}`));
-          else resolve(rows);
+        streamResult: true,
+        complete: (err, stmt) => {
+          if (err) {
+            reject(new Error(`Snowflake query failed (${targetTable}): ${err.message}`));
+            return;
+          }
+
+          const out = [];
+          const stream = stmt.streamRows();
+
+          stream.on('data', (row) => {
+            const normalized = {};
+            for (const key in row) {
+              normalized[key.toLowerCase()] = row[key];
+            }
+            out.push(normalized);
+          });
+
+          stream.on('end', () => resolve(out));
+
+          stream.on('error', (streamErr) => {
+            reject(new Error(`Snowflake stream error (${targetTable}): ${streamErr.message}`));
+          });
         },
       });
     });
-
-    return rows.map(row => this._normalizeRow(row));
   }
 
   /**

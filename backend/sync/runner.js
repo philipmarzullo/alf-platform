@@ -125,8 +125,9 @@ export async function runSync(supabase, syncConfig, options = {}) {
 
     // 8. Fetch and upsert each table in sync order
     for (const table of effectiveTables) {
+      let rows = null;
       try {
-        const rows = await fetchWithRetry(connector, table);
+        rows = await fetchWithRetry(connector, table);
         if (rows.length === 0) {
           rowCounts[table] = { fetched: 0, upserted: 0, skipped: 0 };
           continue;
@@ -141,6 +142,11 @@ export async function runSync(supabase, syncConfig, options = {}) {
       } catch (err) {
         errors.push({ table, error: err.message });
         rowCounts[table] = { fetched: 0, upserted: 0, error: err.message };
+      } finally {
+        // Release the in-memory row buffer before starting the next table so
+        // the GC can reclaim memory between large fact tables (FACT_TIMEKEEPING
+        // etc.). Prevents heap buildup when syncing many tables in sequence.
+        rows = null;
       }
     }
   } catch (err) {
