@@ -103,7 +103,35 @@ async function refreshTenant(syncConfig) {
       tables: Object.keys(syncResult.rowCounts || {}).length,
       errors: syncResult.errors?.length || 0,
     };
-    console.log(`  ✓ sync status=${syncResult.status}`);
+    const marker = syncResult.status === 'success' ? '✓' : '✗';
+    console.log(`  ${marker} sync status=${syncResult.status} log_id=${syncResult.logId}`);
+    if (syncResult.rowCounts && Object.keys(syncResult.rowCounts).length > 0) {
+      for (const [table, counts] of Object.entries(syncResult.rowCounts)) {
+        const parts = [];
+        if (counts.fetched != null) parts.push(`fetched=${counts.fetched}`);
+        if (counts.upserted != null) parts.push(`upserted=${counts.upserted}`);
+        if (counts.skipped) parts.push(`skipped=${counts.skipped}`);
+        if (counts.error) parts.push(`error="${counts.error}"`);
+        console.log(`    - ${table}: ${parts.join(' ')}`);
+      }
+    }
+    if (syncResult.errors && syncResult.errors.length > 0) {
+      // Log the first handful of errors verbatim so we can diagnose what
+      // went wrong without tailing the sync_logs table separately.
+      const sample = syncResult.errors.slice(0, 5);
+      for (const e of sample) {
+        console.log(`    ! ${e.table || '(no table)'}: ${e.error || JSON.stringify(e)}`);
+      }
+      if (syncResult.errors.length > sample.length) {
+        console.log(`    … +${syncResult.errors.length - sample.length} more errors (see sync_logs.errors)`);
+      }
+    }
+    // A non-success status is a real failure even though runSync didn't
+    // throw — count it toward the tenant's error tally so the cron summary
+    // and exit code reflect reality.
+    if (syncResult.status !== 'success') {
+      result.errors.push({ step: 'sync', status: syncResult.status, errors: syncResult.errors });
+    }
   } catch (err) {
     console.error(`  ✗ sync failed: ${err.message}`);
     result.errors.push({ step: 'sync', error: err.message });
