@@ -100,10 +100,19 @@ export async function upsertTableStream(supabase, tenantId, table, connector, { 
     // Transform in place: write the transformed row back into the same
     // slot, advance a write cursor, then truncate to drop skipped rows.
     // This keeps peak memory at ~1x batch size instead of 2x.
+    //
+    // IMPORTANT: do the transform in a local var first, THEN assign + bump
+    // the write cursor. Writing `batch[writeIdx++] = transformRow(...)` is
+    // buggy because the LHS is evaluated first — if transformRow throws,
+    // writeIdx has already advanced but the slot was never written, so the
+    // raw Snowflake row (with its `job_name` etc.) survives the truncate
+    // and gets sent to PostgREST, which rejects it.
     let writeIdx = 0;
     for (let i = 0; i < batch.length; i++) {
       try {
-        batch[writeIdx++] = transformRow(row(batch[i]), tenantId, schema, fkCaches);
+        const transformed = transformRow(row(batch[i]), tenantId, schema, fkCaches);
+        batch[writeIdx] = transformed;
+        writeIdx++;
       } catch (err) {
         result.skipped++;
         if (result.errors.length < MAX_ERRORS_STORED) {
