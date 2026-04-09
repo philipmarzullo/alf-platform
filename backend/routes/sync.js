@@ -88,6 +88,19 @@ router.get('/tables', requirePlatformAdmin, async (req, res) => {
 
 // ─── Sync Health Check ─────────────────────────────────────────────────
 
+// How old can the last successful sync be before we call it "stale"?
+// Lowered from 48h to 6h (2026-04) so the banner actually means "today's
+// data is stale, refresh it" instead of "too late, something is broken".
+// Override via SYNC_STALE_THRESHOLD_HOURS for tenant-specific tuning later.
+const STALE_THRESHOLD_HOURS = Number(process.env.SYNC_STALE_THRESHOLD_HOURS) || 6;
+const STALE_THRESHOLD_MS = STALE_THRESHOLD_HOURS * 60 * 60 * 1000;
+
+// How old can the last sync be before /run-if-stale will fire a refresh?
+// Kept separate from STALE_THRESHOLD_HOURS so we can show "stale" to the
+// user earlier than we're willing to fire a fresh sync (which costs
+// Snowflake compute).
+const RUN_IF_STALE_DEFAULT_MINUTES = Number(process.env.SYNC_RUN_IF_STALE_MINUTES) || 60;
+
 /**
  * GET /:tenantId/health — Sync health status for dashboards.
  * Any authenticated user in the tenant can read this.
@@ -96,12 +109,11 @@ router.get('/tables', requirePlatformAdmin, async (req, res) => {
  * Status values:
  *   "no_source"  — no sync_config exists (tenant hasn't configured a data source)
  *   "inactive"   — credential is missing, inactive, or sync_config is deactivated
- *   "stale"      — last successful sync is older than 48 hours
+ *   "stale"      — last successful sync is older than STALE_THRESHOLD_HOURS
  *   "healthy"    — credential active and recent sync exists
  */
 router.get('/:tenantId/health', requireTenantAccess, async (req, res) => {
   const tenantId = req.params.tenantId;
-  const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 hours
 
   // Connector types that use platform credentials instead of tenant credentials
   const PLATFORM_CREDENTIAL_TYPES = ['snowflake'];
@@ -408,6 +420,91 @@ router.post('/:tenantId/run', requirePlatformAdmin, async (req, res) => {
   } catch (err) {
     console.error('[sync] Run error:', err.message);
     res.status(500).json({ error: 'Sync failed', details: err.message });
+  }
+});
+
+/**
+ * POST /:tenantId/run-if-stale — Fire a sync in the background if the last
+ * successful run is older than `max_age_minutes` (default 60). Any user in
+ * the tenant can call this; it's gated by the staleness window so a
+ * stampede of page loads can't trigger more than one Snowflake run.
+ *
+ * Body: { max_age_minutes? } — defaults to SYNC_RUN_IF_STALE_MINUTES env.
+ * Returns:
+ *   { skipped: true, last_sync_at }   — still fresh, nothing done
+ *   { started: true, last_sync_at }   — sync kicked off in the background
+ *
+ * Intended caller: SyncHealthBanner mount hook on any sync-backed dashboard.
+ */
+router.post('/:tenantId/run-if-stale', requireTenantAccess, async (req, res) => {
+  const tenantId = req.params.tenantId;
+  const maxAgeMinutes = Number(req.body?.max_age_minutes ?? RUN_IF_STALE_DEFAULT_MINUTES) || RUN_IF_STALE_DEFAULT_MINUTES;
+
+  try {
+    // Short-circuit for tenants on snowflake_direct — they don't use the
+    // sync pipeline at all, so nothing to refresh.
+    const { data: tenantRow } = await req.supabase
+      .from('alf_tenants')
+      .select('snowflake_direct')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (tenantRow?.snowflake_direct) {
+      return res.json({ skipped: true, reason: 'snowflake_direct', last_sync_at: null });
+    }
+
+    // Find the first active sync config for this tenant.
+    const { data: syncConfig, error: cfgErr } = await req.supabase
+      .from('sync_configs')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+
+    if (cfgErr) throw cfgErr;
+    if (!syncConfig) {
+      return res.json({ skipped: true, reason: 'no_source', last_sync_at: null });
+    }
+
+    // Dedup: if the most recent successful sync is younger than the window,
+    // do nothing. This is the thundering-herd guard that lets us call this
+    // endpoint from every dashboard page-load without worry.
+    const { data: lastSync } = await req.supabase
+      .from('sync_logs')
+      .select('completed_at')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'success')
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const lastSyncAt = lastSync?.completed_at || syncConfig.last_sync_at || null;
+    if (lastSyncAt && (Date.now() - new Date(lastSyncAt).getTime()) < maxAgeMinutes * 60_000) {
+      return res.json({ skipped: true, reason: 'fresh', last_sync_at: lastSyncAt });
+    }
+
+    // Also dedup against any currently-running sync for this tenant.
+    const { data: running } = await req.supabase
+      .from('sync_logs')
+      .select('id, started_at')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'running')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (running) {
+      return res.json({ skipped: true, reason: 'already_running', log_id: running.id, last_sync_at: lastSyncAt });
+    }
+
+    // Fire-and-forget. runSync writes its own sync_logs row and updates
+    // sync_configs.last_sync_at when done; the client polls /health.
+    runSync(req.supabase, syncConfig, { triggeredBy: 'scheduled', userId: req.user.id })
+      .catch(err => console.error(`[sync] run-if-stale background run failed: ${err.message}`));
+
+    return res.json({ started: true, last_sync_at: lastSyncAt });
+  } catch (err) {
+    console.error('[sync] run-if-stale error:', err.message);
+    res.status(500).json({ error: 'Failed to check/run sync', details: err.message });
   }
 });
 

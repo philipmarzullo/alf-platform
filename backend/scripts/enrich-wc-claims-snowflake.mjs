@@ -70,16 +70,16 @@ function normJob(v) {
   return s.length ? s : null;
 }
 
-async function main() {
+async function main({ tenantId = AA_TENANT_ID } = {}) {
   console.log('[enrich-wc-claims] Starting…');
-  console.log(`  Tenant: ${AA_TENANT_ID}`);
+  console.log(`  Tenant: ${tenantId}`);
   console.log(`  VP tier column: ${VP_TIER_COL}`);
 
   // ── 1. Fetch all wc_claims rows for the tenant ──────────────────────────
   const { data: claims, error: claimsErr } = await supabase
     .from('wc_claims')
     .select('id, claim_number, job_number, job_name, vp')
-    .eq('tenant_id', AA_TENANT_ID);
+    .eq('tenant_id', tenantId);
   if (claimsErr) throw new Error(`Failed to fetch wc_claims: ${claimsErr.message}`);
   console.log(`  Loaded ${claims.length} claims from Supabase`);
 
@@ -88,11 +88,11 @@ async function main() {
 
   if (claimsWithJob.length === 0) {
     console.log('[enrich-wc-claims] Nothing to enrich.');
-    return;
+    return { matched: 0, unmatched: 0, applied: 0 };
   }
 
-  // ── 2. Connect to Snowflake and pull DIM_JOB for A&A ────────────────────
-  const { connector, config } = await getConnector(AA_TENANT_ID);
+  // ── 2. Connect to Snowflake and pull DIM_JOB for the tenant ─────────────
+  const { connector, config } = await getConnector(tenantId);
   const fqPrefix = `${config.tenant_database}.${config.schema || 'PUBLIC'}`;
   const dimJobFq = `${fqPrefix}.DIM_JOB`;
 
@@ -166,11 +166,11 @@ async function main() {
   }
 
   // ── 4. Apply patches ────────────────────────────────────────────────────
+  let applied = 0;
   if (patches.length === 0) {
     console.log('[enrich-wc-claims] No updates needed — already in sync.');
   } else {
     console.log(`  Applying ${patches.length} updates…`);
-    let applied = 0;
     for (const p of patches) {
       const { id, ...fields } = p;
       const { error: upErr } = await supabase
@@ -188,6 +188,14 @@ async function main() {
 
   // ── 5. Cleanup ──────────────────────────────────────────────────────────
   try { connector.destroy?.(); } catch {}
+
+  return {
+    matched: stats.matched,
+    unmatched: stats.unmatched,
+    jobNameChanged: stats.jobNameChanged,
+    vpChanged: stats.vpChanged,
+    applied,
+  };
 }
 
 // Export so seed-wc-claims.mjs can call us in-process after seeding.
