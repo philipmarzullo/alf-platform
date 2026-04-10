@@ -9,6 +9,12 @@ const router = Router();
 
 const PLATFORM_ROLES = ['super-admin', 'platform_owner'];
 
+const INSPECTION_EXCLUSIONS = `(
+  'DO NOT USE - INACTIVE','Property Received','Medical Inspection',
+  'Tesla Daily/Nightly Report','LIU Daily/Nightly Report',
+  'Byte Dance Daily/Nightly Report','Honda Employee Use Only','CIMS Self-Audit'
+)`;
+
 function resolveEffectiveTenantId(req, paramTenantId) {
   if (PLATFORM_ROLES.includes(req.user?.role)) {
     return paramTenantId || req.tenantId;
@@ -87,16 +93,7 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
       `j.JOB_TIER_08_CURRENT_VALUE_LABEL IS NOT NULL`,
       `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
-      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN (
-        'DO NOT USE - INACTIVE',
-        'Property Received',
-        'Medical Inspection',
-        'Tesla Daily/Nightly Report',
-        'LIU Daily/Nightly Report',
-        'Byte Dance Daily/Nightly Report',
-        'Honda Employee Use Only',
-        'CIMS Self-Audit'
-      )`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
@@ -185,16 +182,7 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
       `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
       `j.JOB_TIER_03_CURRENT_VALUE_LABEL IS NOT NULL`,
       `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
-      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN (
-        'DO NOT USE - INACTIVE',
-        'Property Received',
-        'Medical Inspection',
-        'Tesla Daily/Nightly Report',
-        'LIU Daily/Nightly Report',
-        'Byte Dance Daily/Nightly Report',
-        'Honda Employee Use Only',
-        'CIMS Self-Audit'
-      )`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
@@ -455,85 +443,219 @@ router.get('/:tenantId/quality-kpis', async (req, res) => {
   }
 });
 
-// ─── GET /:tenantId/financial-kpis ───────────────────────────────────────────
+// ─── GET /:tenantId/financial-kpis (Payroll Actuals via FACT_TIMEKEEPING) ────
 
 router.get('/:tenantId/financial-kpis', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp = 'all', manager = 'all' } = req.query;
+    const { startDate, endDate, vp, manager } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
+    const binds = [config.company_filter];
 
-    // Debug: peek at raw table to confirm data exists
-    try {
-      const peekSql = `SELECT * FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL LIMIT 3`;
-      const peekRows = await connector.queryView(peekSql, []);
-      console.log('[ops-workspace financial DEBUG] company_filter:', config.company_filter);
-      console.log('[ops-workspace financial DEBUG] startDate:', startDate, 'endDate:', endDate, 'vp:', vp, 'manager:', manager);
-      console.log('[ops-workspace financial DEBUG] FACT_LABOR_BUDGET_TO_ACTUAL sample (3 rows):', JSON.stringify(peekRows, null, 2));
-    } catch (peekErr) {
-      console.error('[ops-workspace financial DEBUG] peek failed:', peekErr.message);
-    }
+    const conditions = [`j.JOB_COMPANY_NAME = :1`];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
 
-    function buildFinancialSql(applyDates) {
-      const sd = applyDates ? (startDate || '2020-01-01') : '2020-01-01';
-      const ed = applyDates ? (endDate   || '2099-12-31') : '2099-12-31';
-      const b = [config.company_filter, sd, ed, vp, manager];
-      const s = `
-        SELECT
-          SUM(l.ACTUAL_DOLLAR_AMOUNT)  AS actual_labor,
-          SUM(l.BUDGET_DOLLAR_AMOUNT)  AS budget_labor,
-          SUM(l.ACTUAL_HOURS)          AS actual_hours,
-          SUM(l.BUDGET_HOURS)          AS budget_hours
-        FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
-        JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
-        JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
-        WHERE j.JOB_COMPANY_NAME = :1
-          AND d.CALENDAR_DATE BETWEEN TO_DATE(:2, 'YYYY-MM-DD') AND TO_DATE(:3, 'YYYY-MM-DD')
-          AND j.JOB_TIER_08_CURRENT_VALUE_LABEL = CASE WHEN :4 = 'all' THEN j.JOB_TIER_08_CURRENT_VALUE_LABEL ELSE :4 END
-          AND j.JOB_TIER_03_CURRENT_VALUE_LABEL = CASE WHEN :5 = 'all' THEN j.JOB_TIER_03_CURRENT_VALUE_LABEL ELSE :5 END
-      `;
-      return { sql: s, binds: b };
-    }
+    const sql = `
+      SELECT
+        SUM(t.TIMEKEEPING_TOTAL_DOLLAR_AMOUNT)                                   AS total_dollars,
+        SUM(t.TIMEKEEPING_REGULAR_DOLLAR_AMOUNT)                                 AS regular_dollars,
+        SUM(t.TIMEKEEPING_OVERTIME_DOLLAR_AMOUNT + t.TIMEKEEPING_DOUBLETIME_DOLLAR_AMOUNT) AS ot_dollars,
+        SUM(t.TIMEKEEPING_TOTAL_HOURS)                                           AS total_hours,
+        SUM(t.TIMEKEEPING_REGULAR_HOURS)                                         AS regular_hours,
+        SUM(t.TIMEKEEPING_OVERTIME_HOURS + t.TIMEKEEPING_DOUBLETIME_HOURS)       AS ot_hours
+      FROM ${prefix}.FACT_TIMEKEEPING t
+      JOIN ${prefix}.DIM_DATE d ON t.WORK_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON t.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+    `;
 
-    // Try with date filter first
-    const dated = buildFinancialSql(true);
-    console.log('[ops-workspace financial DEBUG] query binds:', dated.binds);
-    let rows = await connector.queryView(dated.sql, dated.binds);
-    let r = rows[0] || {};
-    let dateFiltered = true;
+    const rows = await connector.queryView(sql, binds);
+    const r = rows[0] || {};
 
-    let actual = Number(r.actual_labor) || 0;
-    let budget = Number(r.budget_labor) || 0;
-    console.log('[ops-workspace financial DEBUG] date-filtered result:', { actual, budget });
-
-    // Fallback: if no data in selected period, re-run all-time
-    if (actual === 0 && budget === 0) {
-      const allTime = buildFinancialSql(false);
-      rows = await connector.queryView(allTime.sql, allTime.binds);
-      r = rows[0] || {};
-      actual = Number(r.actual_labor) || 0;
-      budget = Number(r.budget_labor) || 0;
-      dateFiltered = false;
-      console.log('[ops-workspace financial DEBUG] all-time fallback result:', { actual, budget });
-    }
-
-    const variance = budget ? Math.round(((actual - budget) / budget) * 100 * 10) / 10 : 0;
+    const totalDollars   = Math.round(Number(r.total_dollars) || 0);
+    const regularDollars = Math.round(Number(r.regular_dollars) || 0);
+    const otDollars      = Math.round(Number(r.ot_dollars) || 0);
+    const totalHours     = Math.round(Number(r.total_hours) || 0);
+    const regularHours   = Math.round(Number(r.regular_hours) || 0);
+    const otHours        = Math.round(Number(r.ot_hours) || 0);
+    const otPct          = totalHours > 0 ? Math.round((otHours / totalHours) * 1000) / 10 : 0;
 
     res.json({
-      actualLaborDollars: actual,
-      budgetLaborDollars: budget,
-      laborVariancePct:   variance,
-      actualHours:        Math.round(Number(r.actual_hours) || 0),
-      budgetHours:        Math.round(Number(r.budget_hours) || 0),
-      hasData:            actual > 0 || budget > 0,
-      dateFiltered,
-      note:               dateFiltered ? null : 'Showing all available data — no records found in selected period',
+      actualLaborDollars: totalDollars,
+      regularDollars,
+      otDollars,
+      totalHours,
+      regularHours,
+      otHours,
+      otPct,
+      hasData: totalDollars > 0 || totalHours > 0,
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/manager-sites ───────────────────────────────────────────
+
+router.get('/:tenantId/manager-sites', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { manager: managerName, startDate, endDate } = req.query;
+    if (!managerName) return res.status(400).json({ error: 'manager param required' });
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter, managerName];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
+      `j.JOB_TIER_03_CURRENT_VALUE_LABEL = :2`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+
+    const sql = `
+      SELECT
+        j.JOB_NAME                                                AS job_name,
+        j.JOB_NUMBER                                              AS job_number,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL                        AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL                        AS manager,
+        COUNT(DISTINCT c.CHECKPOINT_KEY)                          AS total_inspections,
+
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              IN ('Safety Inspection', 'Safety Inspection old')
+              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS safety_pct,
+
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              NOT IN ('Safety Inspection', 'Safety Inspection old')
+              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS inspection_score,
+
+        SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)                AS total_deficiencies,
+        SUM(c.CHECKPOINT_DEFICIENT_ITEM_OPEN_QUANTITY)           AS open_deficiencies,
+
+        ROUND(
+          NULLIF(SUM(c.CHECKPOINT_DEFICIENT_ITEM_CLOSED_QUANTITY), 0) /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY > 0
+            THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS avg_close_days
+
+      FROM ${prefix}.FACT_CHECKPOINT c
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = c.CHECKPOINT_PERFORMED_DATE_KEY
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY j.JOB_NAME, j.JOB_NUMBER, j.JOB_TIER_08_CURRENT_VALUE_LABEL, j.JOB_TIER_03_CURRENT_VALUE_LABEL
+      ORDER BY open_deficiencies DESC
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      rows: rows.map(r => ({
+        jobName:          r.job_name,
+        jobNumber:        r.job_number,
+        vp:               r.vp,
+        manager:          r.manager,
+        totalInspections: Number(r.total_inspections) || 0,
+        safetyPct:        r.safety_pct != null ? Number(r.safety_pct) : null,
+        inspectionScore:  r.inspection_score != null ? Number(r.inspection_score) : null,
+        totalDeficiencies: Number(r.total_deficiencies) || 0,
+        openDeficiencies: Number(r.open_deficiencies) || 0,
+        avgCloseDays:     r.avg_close_days != null ? Number(r.avg_close_days) : null,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace manager-sites error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/site-deficiencies ───────────────────────────────────────
+
+router.get('/:tenantId/site-deficiencies', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { jobNumber, startDate, endDate } = req.query;
+    if (!jobNumber) return res.status(400).json({ error: 'jobNumber param required' });
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter, jobNumber];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
+      `j.JOB_NUMBER = :2`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+
+    const sql = `
+      SELECT
+        li.CHECKPOINT_ITEM_TYPE_LABEL                             AS area_type,
+        li.CHECKPOINT_AREA_LABEL                                  AS area,
+        li.CHECKPOINT_ITEM_LABEL                                  AS item,
+        li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT                 AS detail,
+        li.IS_CHECKPOINT_ITEM_DEFICIENCY_OPEN_FLAG                AS is_open,
+        li.IS_CHECKPOINT_ITEM_DEFICIENCY_CLOSED_FLAG              AS is_closed,
+        li.CHECKPOINT_DEFICIENT_ITEM_CLOSED_TIMESTAMP             AS closed_at,
+        li.CHECKPOINT_DEFICIENT_ITEM_CLOSED_BY_NAME               AS closed_by,
+        li.CHECKPOINT_ITEM_NOTES                                  AS notes,
+        d.CALENDAR_DATE                                           AS inspection_date,
+        c.CHECKPOINT_TEMPLATE_DESCRIPTION                         AS inspection_type
+      FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+      JOIN ${prefix}.FACT_CHECKPOINT c ON c.CHECKPOINT_ID = li.CHECKPOINT_ID
+      JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = li.CHECKPOINT_PERFORMED_DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON j.JOB_KEY = li.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY d.CALENDAR_DATE DESC
+      LIMIT 2000
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    // Compute repeat items (item label appearing >1 time at this site)
+    const itemCounts = {};
+    for (const r of rows) {
+      const key = (r.item || '').toLowerCase();
+      itemCounts[key] = (itemCounts[key] || 0) + 1;
+    }
+
+    const items = rows.map(r => ({
+      areaType:       r.area_type || '',
+      area:           r.area || '',
+      item:           r.item || '',
+      detail:         r.detail || '',
+      isOpen:         r.is_open === 1,
+      isClosed:       r.is_closed === 1,
+      closedAt:       r.closed_at || null,
+      closedBy:       r.closed_by || null,
+      notes:          r.notes || '',
+      inspectionDate: r.inspection_date || null,
+      inspectionType: r.inspection_type || '',
+      isRepeat:       itemCounts[(r.item || '').toLowerCase()] > 1,
+    }));
+
+    const openItems = items.filter(i => i.isOpen);
+    const areas = new Set(openItems.map(i => i.area).filter(Boolean));
+
+    res.json({
+      items,
+      summary: {
+        totalCount: items.length,
+        openCount:  openItems.length,
+        areaCount:  areas.size,
+      },
+    });
+  } catch (err) {
+    console.error('ops-workspace site-deficiencies error:', err);
     res.status(500).json({ error: err.message });
   }
 });
