@@ -86,6 +86,17 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       `j.JOB_COMPANY_NAME = :1`,
       `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
       `j.JOB_TIER_08_CURRENT_VALUE_LABEL IS NOT NULL`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN (
+        'DO NOT USE - INACTIVE',
+        'Property Received',
+        'Medical Inspection',
+        'Tesla Daily/Nightly Report',
+        'LIU Daily/Nightly Report',
+        'Byte Dance Daily/Nightly Report',
+        'Honda Employee Use Only',
+        'CIMS Self-Audit'
+      )`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
@@ -95,18 +106,18 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
         j.JOB_TIER_08_CURRENT_VALUE_LABEL                        AS vp,
         COUNT(DISTINCT c.JOB_KEY)                                AS job_count,
 
-        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%safety%'
-              THEN c.CHECKPOINT_ID END)                           AS safety_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%safety%'
+        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              IN ('Safety Inspection', 'Safety Inspection old')
+              THEN c.CHECKPOINT_KEY END)                          AS safety_insp_count,
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS safety_pct,
 
-        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%commercial%'
-              OR (c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT ILIKE '%safety%'
-                  AND c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection')
-              THEN c.CHECKPOINT_ID END)                           AS commercial_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%commercial%'
-              OR (c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT ILIKE '%safety%'
-                  AND c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection')
+        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              NOT IN ('Safety Inspection', 'Safety Inspection old')
+              THEN c.CHECKPOINT_KEY END)                          AS commercial_insp_count,
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              NOT IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS commercial_pct,
 
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)                AS total_deficiencies,
@@ -173,6 +184,17 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
       `j.JOB_COMPANY_NAME = :1`,
       `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
       `j.JOB_TIER_03_CURRENT_VALUE_LABEL IS NOT NULL`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN (
+        'DO NOT USE - INACTIVE',
+        'Property Received',
+        'Medical Inspection',
+        'Tesla Daily/Nightly Report',
+        'LIU Daily/Nightly Report',
+        'Byte Dance Daily/Nightly Report',
+        'Honda Employee Use Only',
+        'CIMS Self-Audit'
+      )`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
@@ -184,18 +206,18 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
         j.JOB_TIER_01_CURRENT_VALUE_LABEL                        AS region,
         COUNT(DISTINCT c.JOB_KEY)                                AS job_count,
 
-        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%safety%'
-              THEN c.CHECKPOINT_ID END)                           AS safety_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%safety%'
+        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              IN ('Safety Inspection', 'Safety Inspection old')
+              THEN c.CHECKPOINT_KEY END)                          AS safety_insp_count,
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS safety_pct,
 
-        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%commercial%'
-              OR (c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT ILIKE '%safety%'
-                  AND c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection')
-              THEN c.CHECKPOINT_ID END)                           AS commercial_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION ILIKE '%commercial%'
-              OR (c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT ILIKE '%safety%'
-                  AND c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection')
+        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              NOT IN ('Safety Inspection', 'Safety Inspection old')
+              THEN c.CHECKPOINT_KEY END)                          AS commercial_insp_count,
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+              NOT IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS commercial_pct,
 
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)                AS total_deficiencies,
@@ -205,14 +227,14 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
         ROUND(
           NULLIF(SUM(c.CHECKPOINT_DEFICIENT_ITEM_CLOSED_QUANTITY), 0) /
           NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY > 0
-            THEN c.CHECKPOINT_ID END), 0)
+            THEN c.CHECKPOINT_KEY END), 0)
         , 1)                                                      AS avg_close_days
 
       FROM ${prefix}.FACT_CHECKPOINT c
       JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
       JOIN ${prefix}.DIM_DATE d ON d.DATE_KEY = c.CHECKPOINT_PERFORMED_DATE_KEY
       WHERE ${conditions.join(' AND ')}
-      GROUP BY manager, vp, region
+      GROUP BY j.JOB_TIER_03_CURRENT_VALUE_LABEL, j.JOB_TIER_08_CURRENT_VALUE_LABEL, j.JOB_TIER_01_CURRENT_VALUE_LABEL
       ORDER BY manager
     `;
 
@@ -356,6 +378,10 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     const otHours        = Number(ot.ot_hours)        || 0;
     const totalHours     = Number(ot.total_hours)     || 0;
 
+    const hasTurnoverData = totalEmployees > 0;
+    const hasOvertimeData = totalHours > 0;
+    const hasAbsenceData  = (Number(abs.employees_with_absences) || 0) > 0;
+
     res.json({
       activeHeadcount:    Number(hc.active_headcount) || 0,
       turnoverRate:       totalEmployees ? Math.round((terminations / totalEmployees) * 100 * 10) / 10 : 0,
@@ -364,10 +390,11 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
       totalAbsenceHours:  Math.round(Number(abs.total_absence_hours) || 0),
       terminations,
       totalHours:         Math.round(totalHours),
-      // Flags so frontend can distinguish "no data in period" from real zeros
-      hasTurnoverData:    totalEmployees > 0,
-      hasOvertimeData:    totalHours > 0,
-      hasAbsenceData:     (Number(abs.employees_with_absences) || 0) > 0,
+      hasTurnoverData,
+      hasOvertimeData,
+      hasAbsenceData,
+      dataNote: (!hasTurnoverData && !hasOvertimeData && !hasAbsenceData)
+        ? 'No activity in selected period' : null,
     });
   } catch (err) {
     console.error('ops-workspace workforce-kpis error:', err);
@@ -443,7 +470,14 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
     function buildFinancialSql(applyDates) {
       const b = [config.company_filter];
       const c = [`l.TENANT_ID = :1`, `j.TENANT_ID = :1`];
-      if (applyDates) c.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, b));
+      if (applyDates) {
+        const dateParts = [];
+        if (startDate) { b.push(startDate); dateParts.push(`CALENDAR_DATE >= :${b.length}`); }
+        if (endDate)   { b.push(endDate);   dateParts.push(`CALENDAR_DATE <= :${b.length}`); }
+        if (dateParts.length) {
+          c.push(`l.DATE_KEY IN (SELECT DATE_KEY FROM ${prefix}.DIM_DATE WHERE ${dateParts.join(' AND ')})`);
+        }
+      }
       c.push(...addJobTierFilters('j', { vp, manager }, b));
       const s = `
         SELECT
@@ -452,7 +486,6 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
           SUM(l.ACTUAL_HOURS)          AS actual_hours,
           SUM(l.BUDGET_HOURS)          AS budget_hours
         FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
-        JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
         JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
         WHERE ${c.join(' AND ')}
       `;
@@ -488,7 +521,7 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       budgetHours:        Math.round(Number(r.budget_hours) || 0),
       hasData:            actual > 0 || budget > 0,
       dateFiltered,
-      note:               dateFiltered ? null : 'No data in selected date range — showing all-time totals',
+      note:               dateFiltered ? null : 'Showing all available data — no records found in selected period',
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
