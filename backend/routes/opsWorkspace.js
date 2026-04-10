@@ -310,10 +310,9 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     `;
 
     // ── Turnover (FACT_EMPLOYEE_STATUS_HISTORY + DIM_EMPLOYEE_STATUS) ──
-    const toBinds = [config.company_filter, config.company_filter];
+    const toBinds = [config.company_filter];
     const toCond = [
-      `h.TENANT_ID = :1`,
-      `j.TENANT_ID = :2`,
+      `j.JOB_COMPANY_NAME = :1`,
     ];
     if (startDate) { toBinds.push(startDate); toCond.push(`h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP >= :${toBinds.length}`); }
     if (endDate)   { toBinds.push(endDate);   toCond.push(`h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP <= :${toBinds.length}`); }
@@ -333,8 +332,8 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     `;
 
     // ── Overtime % (FACT_TIMEKEEPING — dedicated OT/DT columns) ──
-    const otBinds = [config.company_filter, config.company_filter];
-    const otCond = [`t.TENANT_ID = :1`, `j.TENANT_ID = :2`];
+    const otBinds = [config.company_filter];
+    const otCond = [`j.JOB_COMPANY_NAME = :1`];
     otCond.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, otBinds));
     otCond.push(...addJobTierFilters('j', { vp, manager, jobNumber }, otBinds));
 
@@ -352,8 +351,8 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     `;
 
     // ── Absenteeism (FACT_EMPLOYEE_ABSENCE — direct ABSENCE_DATE) ──
-    const absBinds = [config.company_filter, config.company_filter];
-    const absCond = [`a.TENANT_ID = :1`, `j.TENANT_ID = :2`];
+    const absBinds = [config.company_filter];
+    const absCond = [`j.JOB_COMPANY_NAME = :1`];
     if (startDate) { absBinds.push(startDate); absCond.push(`a.ABSENCE_DATE >= :${absBinds.length}`); }
     if (endDate)   { absBinds.push(endDate);   absCond.push(`a.ABSENCE_DATE <= :${absBinds.length}`); }
     absCond.push(...addJobTierFilters('j', { vp, manager, jobNumber }, absBinds));
