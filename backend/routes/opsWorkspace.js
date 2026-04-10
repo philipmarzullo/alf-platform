@@ -713,4 +713,74 @@ router.get('/:tenantId/site-deficiencies', async (req, res) => {
   }
 });
 
+// ─── GET /:tenantId/safety-kpis ─────────────────────────────────────────────
+// Reads from Supabase wc_claims (same source as Safety Workspace).
+// Filters by VP / manager (supervisor) / job_number / date range.
+
+router.get('/:tenantId/safety-kpis', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { data: claims, error } = await req.supabase
+      .from('wc_claims')
+      .select('*')
+      .eq('tenant_id', tenantId);
+    if (error) throw error;
+
+    // Apply filters in JS (table is small — a few hundred rows max)
+    const filtered = (claims || []).filter(c => {
+      if (vp && vp !== 'all' && c.vp !== vp) return false;
+      if (manager && manager !== 'all' && c.supervisor !== manager) return false;
+      if (jobNumber && jobNumber !== 'all' && String(c.job_number) !== String(jobNumber)) return false;
+      if (startDate && (!c.date_of_loss || c.date_of_loss < startDate)) return false;
+      if (endDate && (!c.date_of_loss || c.date_of_loss > endDate)) return false;
+      return true;
+    });
+
+    const open = filtered.filter(c => c.claim_status === 'Open');
+
+    const oowCount = open.filter(c => {
+      const s = (c.work_status || c.ee_status || '').toLowerCase();
+      return s.includes('out of work') || s === 'oow';
+    }).length;
+
+    const totalIncurred = filtered.reduce((s, c) => s + Number(c.total_incurred || 0), 0);
+
+    // Recordable = Liberty-tracked (Open + Closed), excludes Non-Reportable
+    const recordable = filtered.filter(c => c.claim_status !== 'Non-Reportable');
+    const recordableCount = recordable.length;
+
+    // Lost time = claims with lost_time_days > 0
+    const lostTimeCount = filtered.filter(c => Number(c.lost_time_days || 0) > 0).length;
+
+    // Top sites by claim count
+    const bySite = {};
+    for (const c of filtered) {
+      const name = c.job_name || 'Unknown';
+      if (!bySite[name]) bySite[name] = 0;
+      bySite[name]++;
+    }
+    const highRiskSites = Object.entries(bySite)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => ({ name, count }));
+
+    res.json({
+      openClaims: open.length,
+      outOfWork: oowCount,
+      totalIncurred: Math.round(totalIncurred),
+      recordableIncidents: recordableCount,
+      lostTimeIncidents: lostTimeCount,
+      highRiskSites,
+      totalClaims: filtered.length,
+      hasData: filtered.length > 0,
+    });
+  } catch (err) {
+    console.error('ops-workspace safety-kpis error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
