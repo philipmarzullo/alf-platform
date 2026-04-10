@@ -31,10 +31,11 @@ function addDateFilters(col, { startDate, endDate }, binds) {
   return parts;
 }
 
-function addJobTierFilters(alias, { vp, manager }, binds) {
+function addJobTierFilters(alias, { vp, manager, region }, binds) {
   const parts = [];
   if (vp && vp !== 'all')      { binds.push(vp);      parts.push(`${alias}.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds.length}`); }
   if (manager && manager !== 'all') { binds.push(manager); parts.push(`${alias}.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds.length}`); }
+  if (region && region !== 'all')  { binds.push(region);  parts.push(`${alias}.JOB_TIER_01_CURRENT_VALUE_LABEL = :${binds.length}`); }
   return parts;
 }
 
@@ -67,7 +68,9 @@ router.get('/:tenantId/filter-options', async (req, res) => {
     const managers = rows
       .filter(r => r.manager)
       .map(r => ({ manager: r.manager, vp: r.vp, region: r.region }));
-    const regions = [...new Set(rows.map(r => r.region).filter(Boolean))].sort();
+    const regions = rows
+      .filter(r => r.region)
+      .map(r => ({ region: r.region, vp: r.vp, manager: r.manager }));
 
     res.json({ vps, managers, regions });
   } catch (err) {
@@ -82,7 +85,7 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager, threshold = 50 } = req.query;
+    const { startDate, endDate, vp, manager, region, threshold = 50 } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -96,7 +99,7 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
 
     const sql = `
       SELECT
@@ -171,7 +174,7 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager, threshold = 50 } = req.query;
+    const { startDate, endDate, vp, manager, region, threshold = 50 } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -185,7 +188,7 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
       `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
 
     const sql = `
       SELECT
@@ -259,7 +262,7 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager } = req.query;
+    const { startDate, endDate, vp, manager, region } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -273,10 +276,11 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
       `w.IS_ACTIVE_FLAG = 1`,
     ];
     hcCond.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, hcBinds));
-    // VP/Manager filtering via subquery on DIM_JOB
+    // VP/Manager/Region filtering via subquery on DIM_JOB
     const hcTierParts = [];
-    if (vp && vp !== 'all')      { hcBinds.push(vp);      hcTierParts.push(`j2.JOB_TIER_08_CURRENT_VALUE_LABEL = :${hcBinds.length}`); }
+    if (vp && vp !== 'all')        { hcBinds.push(vp);      hcTierParts.push(`j2.JOB_TIER_08_CURRENT_VALUE_LABEL = :${hcBinds.length}`); }
     if (manager && manager !== 'all') { hcBinds.push(manager); hcTierParts.push(`j2.JOB_TIER_03_CURRENT_VALUE_LABEL = :${hcBinds.length}`); }
+    if (region && region !== 'all')  { hcBinds.push(region);  hcTierParts.push(`j2.JOB_TIER_01_CURRENT_VALUE_LABEL = :${hcBinds.length}`); }
     const hcTierJoin = hcTierParts.length
       ? `JOIN ${prefix}.DIM_JOB j2 ON j2.JOB_KEY = w.PRIMARY_JOB_KEY AND ${hcTierParts.join(' AND ')}`
       : '';
@@ -297,7 +301,7 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     ];
     if (startDate) { toBinds.push(startDate); toCond.push(`h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP >= :${toBinds.length}`); }
     if (endDate)   { toBinds.push(endDate);   toCond.push(`h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP <= :${toBinds.length}`); }
-    toCond.push(...addJobTierFilters('j', { vp, manager }, toBinds));
+    toCond.push(...addJobTierFilters('j', { vp, manager, region }, toBinds));
 
     const turnoverSql = `
       SELECT
@@ -316,7 +320,7 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     const otBinds = [config.company_filter, config.company_filter];
     const otCond = [`t.TENANT_ID = :1`, `j.TENANT_ID = :2`];
     otCond.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, otBinds));
-    otCond.push(...addJobTierFilters('j', { vp, manager }, otBinds));
+    otCond.push(...addJobTierFilters('j', { vp, manager, region }, otBinds));
 
     const otSql = `
       SELECT
@@ -336,7 +340,7 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
     const absCond = [`a.TENANT_ID = :1`, `j.TENANT_ID = :2`];
     if (startDate) { absBinds.push(startDate); absCond.push(`a.ABSENCE_DATE >= :${absBinds.length}`); }
     if (endDate)   { absBinds.push(endDate);   absCond.push(`a.ABSENCE_DATE <= :${absBinds.length}`); }
-    absCond.push(...addJobTierFilters('j', { vp, manager }, absBinds));
+    absCond.push(...addJobTierFilters('j', { vp, manager, region }, absBinds));
 
     const absenceSql = `
       SELECT
@@ -396,7 +400,7 @@ router.get('/:tenantId/quality-kpis', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager } = req.query;
+    const { startDate, endDate, vp, manager, region } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -407,7 +411,7 @@ router.get('/:tenantId/quality-kpis', async (req, res) => {
       `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
 
     const sql = `
       SELECT
@@ -449,17 +453,18 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager } = req.query;
+    const { startDate, endDate, vp, manager, region } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
-    const binds = [config.company_filter];
 
-    const conditions = [`j.JOB_COMPANY_NAME = :1`];
-    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
+    // ── Payroll actuals (FACT_TIMEKEEPING) ──
+    const payBinds = [config.company_filter];
+    const payCond = [`j.JOB_COMPANY_NAME = :1`];
+    payCond.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, payBinds));
+    payCond.push(...addJobTierFilters('j', { vp, manager, region }, payBinds));
 
-    const sql = `
+    const payrollSql = `
       SELECT
         SUM(t.TIMEKEEPING_TOTAL_DOLLAR_AMOUNT)                                   AS total_dollars,
         SUM(t.TIMEKEEPING_REGULAR_DOLLAR_AMOUNT)                                 AS regular_dollars,
@@ -470,29 +475,62 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       FROM ${prefix}.FACT_TIMEKEEPING t
       JOIN ${prefix}.DIM_DATE d ON t.WORK_DATE_KEY = d.DATE_KEY
       JOIN ${prefix}.DIM_JOB j ON t.JOB_KEY = j.JOB_KEY
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${payCond.join(' AND ')}
     `;
 
-    const rows = await connector.queryView(sql, binds);
-    const r = rows[0] || {};
+    // ── Budget (FACT_LABOR_BUDGET_TO_ACTUAL) ──
+    // Uses DATE_KEY IN (subquery) approach — confirmed working pattern
+    const budBinds = [config.company_filter];
+    const budCond = [`j.JOB_COMPANY_NAME = :1`];
+    if (startDate) { budBinds.push(startDate); budCond.push(`l.DATE_KEY IN (SELECT DATE_KEY FROM ${prefix}.DIM_DATE WHERE CALENDAR_DATE >= :${budBinds.length})`); }
+    if (endDate)   { budBinds.push(endDate);   budCond.push(`l.DATE_KEY IN (SELECT DATE_KEY FROM ${prefix}.DIM_DATE WHERE CALENDAR_DATE <= :${budBinds.length})`); }
+    budCond.push(...addJobTierFilters('j', { vp, manager, region }, budBinds));
 
-    const totalDollars   = Math.round(Number(r.total_dollars) || 0);
-    const regularDollars = Math.round(Number(r.regular_dollars) || 0);
-    const otDollars      = Math.round(Number(r.ot_dollars) || 0);
-    const totalHours     = Math.round(Number(r.total_hours) || 0);
-    const regularHours   = Math.round(Number(r.regular_hours) || 0);
-    const otHours        = Math.round(Number(r.ot_hours) || 0);
+    const budgetSql = `
+      SELECT
+        SUM(l.BUDGET_DOLLAR_AMOUNT) AS budget_dollars,
+        SUM(l.BUDGET_HOURS)         AS budget_hours
+      FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
+      JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
+      WHERE ${budCond.join(' AND ')}
+    `;
+
+    const [payRows, budRows] = await Promise.all([
+      connector.queryView(payrollSql, payBinds),
+      connector.queryView(budgetSql, budBinds),
+    ]);
+
+    const p = payRows[0] || {};
+    const b = budRows[0] || {};
+
+    const totalPayroll   = Math.round(Number(p.total_dollars) || 0);
+    const regularPay     = Math.round(Number(p.regular_dollars) || 0);
+    const otPay          = Math.round(Number(p.ot_dollars) || 0);
+    const totalHours     = Math.round(Number(p.total_hours) || 0);
+    const regularHours   = Math.round(Number(p.regular_hours) || 0);
+    const otHours        = Math.round(Number(p.ot_hours) || 0);
     const otPct          = totalHours > 0 ? Math.round((otHours / totalHours) * 1000) / 10 : 0;
 
+    const budgetDollars  = Math.round(Number(b.budget_dollars) || 0);
+    const budgetHours    = Math.round(Number(b.budget_hours) || 0);
+    const hasBudgetData  = budgetDollars > 0 || budgetHours > 0;
+    const laborVariancePct = budgetDollars > 0
+      ? Math.round(((totalPayroll - budgetDollars) / budgetDollars) * 1000) / 10
+      : 0;
+
     res.json({
-      actualLaborDollars: totalDollars,
-      regularDollars,
-      otDollars,
+      totalPayroll,
+      regularPay,
+      otPay,
       totalHours,
       regularHours,
       otHours,
       otPct,
-      hasData: totalDollars > 0 || totalHours > 0,
+      budgetLaborDollars: budgetDollars,
+      budgetHours,
+      laborVariancePct,
+      hasBudgetData,
+      hasPayrollData: totalPayroll > 0 || totalHours > 0,
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
