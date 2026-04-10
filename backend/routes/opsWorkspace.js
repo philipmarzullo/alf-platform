@@ -461,24 +461,26 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager } = req.query;
+    const { startDate, endDate, vp = 'all', manager = 'all' } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
-    const binds = [config.company_filter];
+
+    // Debug: peek at raw table to confirm data exists
+    try {
+      const peekSql = `SELECT * FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL LIMIT 3`;
+      const peekRows = await connector.queryView(peekSql, []);
+      console.log('[ops-workspace financial DEBUG] company_filter:', config.company_filter);
+      console.log('[ops-workspace financial DEBUG] startDate:', startDate, 'endDate:', endDate, 'vp:', vp, 'manager:', manager);
+      console.log('[ops-workspace financial DEBUG] FACT_LABOR_BUDGET_TO_ACTUAL sample (3 rows):', JSON.stringify(peekRows, null, 2));
+    } catch (peekErr) {
+      console.error('[ops-workspace financial DEBUG] peek failed:', peekErr.message);
+    }
 
     function buildFinancialSql(applyDates) {
-      const b = [config.company_filter];
-      const c = [`l.TENANT_ID = :1`, `j.TENANT_ID = :1`];
-      if (applyDates) {
-        const dateParts = [];
-        if (startDate) { b.push(startDate); dateParts.push(`CALENDAR_DATE >= :${b.length}`); }
-        if (endDate)   { b.push(endDate);   dateParts.push(`CALENDAR_DATE <= :${b.length}`); }
-        if (dateParts.length) {
-          c.push(`l.DATE_KEY IN (SELECT DATE_KEY FROM ${prefix}.DIM_DATE WHERE ${dateParts.join(' AND ')})`);
-        }
-      }
-      c.push(...addJobTierFilters('j', { vp, manager }, b));
+      const sd = applyDates ? (startDate || '2020-01-01') : '2020-01-01';
+      const ed = applyDates ? (endDate   || '2099-12-31') : '2099-12-31';
+      const b = [config.company_filter, config.company_filter, sd, ed, vp, manager];
       const s = `
         SELECT
           SUM(l.ACTUAL_DOLLAR_AMOUNT)  AS actual_labor,
@@ -486,20 +488,27 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
           SUM(l.ACTUAL_HOURS)          AS actual_hours,
           SUM(l.BUDGET_HOURS)          AS budget_hours
         FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
+        JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
         JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
-        WHERE ${c.join(' AND ')}
+        WHERE l.TENANT_ID = :1
+          AND j.TENANT_ID = :2
+          AND d.CALENDAR_DATE BETWEEN TO_DATE(:3, 'YYYY-MM-DD') AND TO_DATE(:4, 'YYYY-MM-DD')
+          AND j.JOB_TIER_08_CURRENT_VALUE_LABEL = CASE WHEN :5 = 'all' THEN j.JOB_TIER_08_CURRENT_VALUE_LABEL ELSE :5 END
+          AND j.JOB_TIER_03_CURRENT_VALUE_LABEL = CASE WHEN :6 = 'all' THEN j.JOB_TIER_03_CURRENT_VALUE_LABEL ELSE :6 END
       `;
       return { sql: s, binds: b };
     }
 
     // Try with date filter first
     const dated = buildFinancialSql(true);
+    console.log('[ops-workspace financial DEBUG] query binds:', dated.binds);
     let rows = await connector.queryView(dated.sql, dated.binds);
     let r = rows[0] || {};
     let dateFiltered = true;
 
     let actual = Number(r.actual_labor) || 0;
     let budget = Number(r.budget_labor) || 0;
+    console.log('[ops-workspace financial DEBUG] date-filtered result:', { actual, budget });
 
     // Fallback: if no data in selected period, re-run all-time
     if (actual === 0 && budget === 0) {
@@ -509,6 +518,7 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       actual = Number(r.actual_labor) || 0;
       budget = Number(r.budget_labor) || 0;
       dateFiltered = false;
+      console.log('[ops-workspace financial DEBUG] all-time fallback result:', { actual, budget });
     }
 
     const variance = budget ? Math.round(((actual - budget) / budget) * 100 * 10) / 10 : 0;
