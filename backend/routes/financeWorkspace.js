@@ -100,10 +100,10 @@ router.get('/:tenantId/gl-distribution', async (req, res) => {
         ga.GL_ACCOUNT_NUMBER           AS gl_account_number,
         ga.GL_ACCOUNT_DESCRIPTION      AS gl_description,
         COUNT(*)                       AS entry_count,
-        SUM(gl.GL_ENTRY_AMOUNT)        AS total_amount
+        SUM(gl.GL_NET_AMOUNT)          AS total_amount
       FROM ${prefix}.FACT_GL_ENTRY gl
       JOIN ${prefix}.DIM_GL_ACCOUNT ga ON gl.GL_ACCOUNT_KEY = ga.GL_ACCOUNT_KEY
-      JOIN ${prefix}.DIM_DATE d ON gl.GL_ENTRY_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_DATE d ON gl.GL_POSTING_DATE_KEY = d.DATE_KEY
       JOIN ${prefix}.DIM_JOB j ON gl.JOB_KEY = j.JOB_KEY
       WHERE ${conditions.join(' AND ')}
       GROUP BY ga.GL_ACCOUNT_NUMBER, ga.GL_ACCOUNT_DESCRIPTION
@@ -170,10 +170,10 @@ router.get('/:tenantId/account-entries', async (req, res) => {
         ga.GL_ACCOUNT_NUMBER           AS gl_account_number,
         ga.GL_ACCOUNT_DESCRIPTION      AS gl_description,
         COUNT(*)                       AS entry_count,
-        SUM(gl.GL_ENTRY_AMOUNT)        AS total_amount
+        SUM(gl.GL_NET_AMOUNT)          AS total_amount
       FROM ${prefix}.FACT_GL_ENTRY gl
       JOIN ${prefix}.DIM_GL_ACCOUNT ga ON gl.GL_ACCOUNT_KEY = ga.GL_ACCOUNT_KEY
-      JOIN ${prefix}.DIM_DATE d ON gl.GL_ENTRY_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_DATE d ON gl.GL_POSTING_DATE_KEY = d.DATE_KEY
       JOIN ${prefix}.DIM_JOB j ON gl.JOB_KEY = j.JOB_KEY
       WHERE ${conditions.join(' AND ')}
       GROUP BY j.JOB_NAME, j.JOB_NUMBER,
@@ -238,13 +238,13 @@ router.get('/:tenantId/job-entries', async (req, res) => {
         d.CALENDAR_DATE                AS entry_date,
         ga.GL_ACCOUNT_NUMBER           AS gl_account_number,
         ga.GL_ACCOUNT_DESCRIPTION      AS gl_description,
-        gl.GL_ENTRY_AMOUNT             AS amount,
-        gl.GL_ENTRY_DESCRIPTION        AS description,
-        gl.GL_ENTRY_SOURCE_REFERENCE   AS source_reference,
-        gl.GL_ENTRY_ENTERED_BY_NAME    AS entered_by
+        gl.GL_NET_AMOUNT               AS amount,
+        gl.SOURCE_REFERENCE_NAME       AS description,
+        gl.SOURCE_DOCUMENT_ID          AS source_reference,
+        gl.USER_ADDED_NAME             AS entered_by
       FROM ${prefix}.FACT_GL_ENTRY gl
       JOIN ${prefix}.DIM_GL_ACCOUNT ga ON gl.GL_ACCOUNT_KEY = ga.GL_ACCOUNT_KEY
-      JOIN ${prefix}.DIM_DATE d ON gl.GL_ENTRY_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_DATE d ON gl.GL_POSTING_DATE_KEY = d.DATE_KEY
       JOIN ${prefix}.DIM_JOB j ON gl.JOB_KEY = j.JOB_KEY
       WHERE ${conditions.join(' AND ')}
       ORDER BY d.CALENDAR_DATE DESC
@@ -365,7 +365,7 @@ router.get('/:tenantId/stale-budgets', async (req, res) => {
     const prefix = fq(config);
     const binds = [config.company_filter];
 
-    const conditions = [`j.JOB_COMPANY_NAME = :1`, `j.JOB_STATUS_LABEL = 'Active'`];
+    const conditions = [`j.JOB_COMPANY_NAME = :1`, `j.IS_JOB_ACTIVE_FLAG = 1`];
     conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
@@ -428,7 +428,7 @@ router.get('/:tenantId/card-charges', async (req, res) => {
 
     const conditions = [
       `j.JOB_COMPANY_NAME = :1`,
-      `(gl.GL_ENTRY_SOURCE_REFERENCE ILIKE '%AMEX%' OR gl.GL_ENTRY_SOURCE_REFERENCE ILIKE '%CORPORATE CARD%' OR gl.GL_ENTRY_SOURCE_REFERENCE ILIKE '%CREDIT CARD%')`,
+      `(gl.SOURCE_REFERENCE_NAME ILIKE '%AMEX%' OR gl.SOURCE_REFERENCE_NAME ILIKE '%CORPORATE CARD%' OR gl.SOURCE_REFERENCE_NAME ILIKE '%CREDIT CARD%')`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
@@ -440,15 +440,15 @@ router.get('/:tenantId/card-charges', async (req, res) => {
         j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
         ga.GL_ACCOUNT_NUMBER           AS gl_account_number,
         ga.GL_ACCOUNT_DESCRIPTION      AS gl_description,
-        gl.GL_ENTRY_AMOUNT             AS amount,
-        gl.GL_ENTRY_DESCRIPTION        AS vendor,
-        gl.GL_ENTRY_ENTERED_BY_NAME    AS entered_by
+        gl.GL_NET_AMOUNT               AS amount,
+        gl.SOURCE_REFERENCE_NAME       AS vendor,
+        gl.USER_ADDED_NAME             AS entered_by
       FROM ${prefix}.FACT_GL_ENTRY gl
       JOIN ${prefix}.DIM_GL_ACCOUNT ga ON gl.GL_ACCOUNT_KEY = ga.GL_ACCOUNT_KEY
-      JOIN ${prefix}.DIM_DATE d ON gl.GL_ENTRY_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_DATE d ON gl.GL_POSTING_DATE_KEY = d.DATE_KEY
       JOIN ${prefix}.DIM_JOB j ON gl.JOB_KEY = j.JOB_KEY
       WHERE ${conditions.join(' AND ')}
-      ORDER BY gl.GL_ENTRY_AMOUNT DESC
+      ORDER BY gl.GL_NET_AMOUNT DESC
       LIMIT 2000
     `;
 
