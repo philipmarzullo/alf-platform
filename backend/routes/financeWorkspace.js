@@ -24,11 +24,11 @@ function addDateFilters(col, { startDate, endDate }, binds) {
   return parts;
 }
 
-function addJobTierFilters(alias, { vp, manager, region }, binds) {
+function addJobTierFilters(alias, { vp, manager, jobNumber }, binds) {
   const parts = [];
-  if (vp && vp !== 'all')      { binds.push(vp);      parts.push(`${alias}.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds.length}`); }
-  if (manager && manager !== 'all') { binds.push(manager); parts.push(`${alias}.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds.length}`); }
-  if (region && region !== 'all')  { binds.push(region);  parts.push(`${alias}.JOB_TIER_01_CURRENT_VALUE_LABEL = :${binds.length}`); }
+  if (vp && vp !== 'all')           { binds.push(vp);        parts.push(`${alias}.JOB_TIER_08_CURRENT_VALUE_LABEL = :${binds.length}`); }
+  if (manager && manager !== 'all') { binds.push(manager);   parts.push(`${alias}.JOB_TIER_03_CURRENT_VALUE_LABEL = :${binds.length}`); }
+  if (jobNumber && jobNumber !== 'all') { binds.push(jobNumber); parts.push(`${alias}.JOB_NUMBER = :${binds.length}`); }
   return parts;
 }
 
@@ -47,12 +47,13 @@ router.get('/:tenantId/filter-options', async (req, res) => {
       SELECT DISTINCT
         j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
         j.JOB_TIER_03_CURRENT_VALUE_LABEL AS manager,
-        j.JOB_TIER_01_CURRENT_VALUE_LABEL AS region
+        j.JOB_NUMBER                      AS job_number,
+        j.JOB_NAME                        AS job_name
       FROM ${prefix}.DIM_JOB j
       WHERE j.JOB_COMPANY_NAME = :1
         AND j.JOB_TIER_08_CURRENT_VALUE_LABEL IS NOT NULL
         AND j.JOB_TIER_08_CURRENT_VALUE_LABEL != ''
-      ORDER BY vp, manager
+      ORDER BY vp, manager, job_name
     `;
 
     const rows = await connector.queryView(sql, binds);
@@ -60,9 +61,16 @@ router.get('/:tenantId/filter-options', async (req, res) => {
     const vps = [...new Set(rows.map(r => r.vp).filter(Boolean))].sort();
     const managers = rows
       .filter(r => r.manager)
-      .map(r => ({ manager: r.manager, vp: r.vp, region: r.region }));
+      .map(r => ({ manager: r.manager, vp: r.vp }));
+    const managersSeen = new Set();
+    const uniqueManagers = managers.filter(m => {
+      const key = `${m.vp}||${m.manager}`;
+      if (managersSeen.has(key)) return false;
+      managersSeen.add(key);
+      return true;
+    });
 
-    res.json({ vps, managers });
+    res.json({ vps, managers: uniqueManagers });
   } catch (err) {
     console.error('finance-workspace filter-options error:', err);
     res.status(500).json({ error: err.message });
@@ -75,7 +83,7 @@ router.get('/:tenantId/gl-distribution', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager, region } = req.query;
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -85,7 +93,7 @@ router.get('/:tenantId/gl-distribution', async (req, res) => {
       `j.JOB_COMPANY_NAME = :1`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
       SELECT
@@ -130,7 +138,7 @@ router.get('/:tenantId/account-entries', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { glAccountNumber, startDate, endDate, vp, manager, region, jobSearch } = req.query;
+    const { glAccountNumber, startDate, endDate, vp, manager, jobNumber, jobSearch } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -151,7 +159,7 @@ router.get('/:tenantId/account-entries', async (req, res) => {
     }
 
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
       SELECT
@@ -267,7 +275,7 @@ router.get('/:tenantId/payroll-actuals', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager, region } = req.query;
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -275,7 +283,7 @@ router.get('/:tenantId/payroll-actuals', async (req, res) => {
 
     const conditions = [`j.JOB_COMPANY_NAME = :1`];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
       SELECT
@@ -351,14 +359,14 @@ router.get('/:tenantId/stale-budgets', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { vp, manager, region } = req.query;
+    const { vp, manager, jobNumber } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
     const binds = [config.company_filter];
 
     const conditions = [`j.JOB_COMPANY_NAME = :1`, `j.JOB_STATUS_LABEL = 'Active'`];
-    conditions.push(...addJobTierFilters('j', { vp: vp, manager: manager, region: region }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
       SELECT
@@ -412,7 +420,7 @@ router.get('/:tenantId/card-charges', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager, region } = req.query;
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -423,7 +431,7 @@ router.get('/:tenantId/card-charges', async (req, res) => {
       `(gl.GL_ENTRY_SOURCE_REFERENCE ILIKE '%AMEX%' OR gl.GL_ENTRY_SOURCE_REFERENCE ILIKE '%CORPORATE CARD%' OR gl.GL_ENTRY_SOURCE_REFERENCE ILIKE '%CREDIT CARD%')`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager, region }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
       SELECT
