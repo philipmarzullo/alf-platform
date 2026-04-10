@@ -94,9 +94,29 @@ async function refreshTenant(syncConfig) {
   };
 
   // ── Step 1: sync the sf_* mirror tables ───────────────────────────────
+  //
+  // HOTFIX 2026-04-09: only sync the two dim tables. The sf_fact_* tables
+  // are full-history pulls (FACT_TIMEKEEPING is ~20M rows for A&A) which
+  // OOM'd the cron repeatedly and, once we bought more RAM, just ran for
+  // >1 hour with incorrect data because there's no incremental watermark
+  // yet. Skipping facts entirely until the incremental-sync work lands.
+  //
+  // Dims stay in — they're small, change slowly, and are required as FK
+  // targets for wc_claims enrichment and any future fact incrementals.
+  // Enrich + validate below cover the wc_claims freshness SLA on their
+  // own; the sf_fact_* dashboards still have whatever data was in them
+  // from the last successful manual sync, and Phase 3's SyncHealthBanner
+  // surfaces staleness at page-load time if anyone notices.
+  //
+  // Remove this override when the incremental sync path is ready.
+  const dimOnlySyncConfig = {
+    ...syncConfig,
+    tables_to_sync: ['sf_dim_job', 'sf_dim_employee'],
+  };
+
   try {
-    console.log(`[nightly-refresh] 1/3 runSync → sf_* tables`);
-    const syncResult = await runSync(supabase, syncConfig, { triggeredBy: 'scheduled' });
+    console.log(`[nightly-refresh] 1/3 runSync → sf_dim_* only (facts skipped, see hotfix note)`);
+    const syncResult = await runSync(supabase, dimOnlySyncConfig, { triggeredBy: 'scheduled' });
     result.sync = {
       status: syncResult.status,
       log_id: syncResult.logId,

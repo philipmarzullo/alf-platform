@@ -153,7 +153,18 @@ function row(r) {
 
 /**
  * Build lookup caches for foreign keys: { lookupValue → uuid }
+ *
+ * IMPORTANT: PostgREST / supabase-js returns a maximum of 1000 rows per
+ * request by default. A naive `.select()` here silently truncates the
+ * cache, causing every FK lookup past the first 1000 rows to miss. For
+ * tenants with thousands of jobs or employees that cascades into a mass
+ * skip during upsert (and used to blow the heap via Error-stack churn).
+ *
+ * Paginate explicitly via `.range(from, to)` until a short page signals
+ * end of data.
  */
+const FK_CACHE_PAGE_SIZE = 1000;
+
 async function buildFkCaches(supabase, tenantId, schema) {
   const caches = {};
 
@@ -165,21 +176,35 @@ async function buildFkCaches(supabase, tenantId, schema) {
     }
 
     const lookupCol = ref.lookupColumn;
-    let query = supabase.from(ref.table).select(`id, ${lookupCol}`);
-
-    // Scope to tenant if the ref table is tenant-scoped
     const refSchema = getTableSchema(ref.table);
-    if (refSchema.tenantScoped) {
-      query = query.eq('tenant_id', tenantId);
+    const cache = new Map();
+
+    let from = 0;
+    while (true) {
+      let query = supabase
+        .from(ref.table)
+        .select(`id, ${lookupCol}`)
+        .range(from, from + FK_CACHE_PAGE_SIZE - 1);
+
+      if (refSchema.tenantScoped) {
+        query = query.eq('tenant_id', tenantId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw new Error(`FK cache build failed for ${ref.table}: ${error.message}`);
+
+      const rows = data || [];
+      for (const row of rows) {
+        cache.set(String(row[lookupCol]), row.id);
+      }
+
+      // Short page = end of data. Also break if the server returned
+      // nothing so we don't loop forever on an unexpected empty result.
+      if (rows.length < FK_CACHE_PAGE_SIZE) break;
+      from += FK_CACHE_PAGE_SIZE;
     }
 
-    const { data, error } = await query;
-    if (error) throw new Error(`FK cache build failed for ${ref.table}: ${error.message}`);
-
-    caches[fkCol] = new Map();
-    for (const row of data || []) {
-      caches[fkCol].set(String(row[lookupCol]), row.id);
-    }
+    caches[fkCol] = cache;
   }
 
   return caches;
