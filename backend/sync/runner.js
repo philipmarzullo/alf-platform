@@ -135,6 +135,8 @@ export async function runSync(supabase, syncConfig, options = {}) {
 
     for (const table of effectiveTables) {
       let rows = null;
+      const tableStart = Date.now();
+      console.log(`[sync:runner] Starting ${table}...`);
       try {
         let result;
         if (supportsStreaming) {
@@ -165,6 +167,8 @@ export async function runSync(supabase, syncConfig, options = {}) {
           result = await upsertTable(supabase, tenantId, table, rows);
         }
         rowCounts[table] = result;
+        const tableElapsed = ((Date.now() - tableStart) / 1000).toFixed(1);
+        console.log(`[sync:runner] Finished ${table} in ${tableElapsed}s — fetched=${result.fetched} upserted=${result.upserted} skipped=${result.skipped || 0}`);
 
         if (result.errors.length > 0) {
           errors.push(...result.errors.map(e => ({ table, ...e })));

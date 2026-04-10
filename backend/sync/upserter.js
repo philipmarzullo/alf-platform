@@ -1,6 +1,6 @@
 import { getTableSchema } from './tableSchemas.js';
 
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 2000;
 const MAX_ERRORS_STORED = 100;
 
 /**
