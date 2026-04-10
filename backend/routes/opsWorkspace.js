@@ -480,7 +480,7 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
     function buildFinancialSql(applyDates) {
       const sd = applyDates ? (startDate || '2020-01-01') : '2020-01-01';
       const ed = applyDates ? (endDate   || '2099-12-31') : '2099-12-31';
-      const b = [config.company_filter, config.company_filter, sd, ed, vp, manager];
+      const b = [config.company_filter, sd, ed, vp, manager];
       const s = `
         SELECT
           SUM(l.ACTUAL_DOLLAR_AMOUNT)  AS actual_labor,
@@ -490,11 +490,10 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
         FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
         JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
         JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
-        WHERE l.TENANT_ID = :1
-          AND j.TENANT_ID = :2
-          AND d.CALENDAR_DATE BETWEEN TO_DATE(:3, 'YYYY-MM-DD') AND TO_DATE(:4, 'YYYY-MM-DD')
-          AND j.JOB_TIER_08_CURRENT_VALUE_LABEL = CASE WHEN :5 = 'all' THEN j.JOB_TIER_08_CURRENT_VALUE_LABEL ELSE :5 END
-          AND j.JOB_TIER_03_CURRENT_VALUE_LABEL = CASE WHEN :6 = 'all' THEN j.JOB_TIER_03_CURRENT_VALUE_LABEL ELSE :6 END
+        WHERE j.JOB_COMPANY_NAME = :1
+          AND d.CALENDAR_DATE BETWEEN TO_DATE(:2, 'YYYY-MM-DD') AND TO_DATE(:3, 'YYYY-MM-DD')
+          AND j.JOB_TIER_08_CURRENT_VALUE_LABEL = CASE WHEN :4 = 'all' THEN j.JOB_TIER_08_CURRENT_VALUE_LABEL ELSE :4 END
+          AND j.JOB_TIER_03_CURRENT_VALUE_LABEL = CASE WHEN :5 = 'all' THEN j.JOB_TIER_03_CURRENT_VALUE_LABEL ELSE :5 END
       `;
       return { sql: s, binds: b };
     }
