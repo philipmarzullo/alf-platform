@@ -69,15 +69,15 @@ export async function upsertTable(supabase, tenantId, table, rows) {
  *   - result.errors is capped at MAX_ERRORS_STORED and omits the raw row
  *     payload so a large table full of FK failures can't blow the heap.
  */
-export async function upsertTableStream(supabase, tenantId, table, connector, { batchSize = BATCH_SIZE } = {}) {
+export async function upsertTableStream(supabase, tenantId, table, connector, { batchSize = BATCH_SIZE, watermark = null, watermarkColumn = null, lookbackDays = null } = {}) {
   const schema = getTableSchema(table);
-  const result = { fetched: 0, upserted: 0, skipped: 0, errors: [] };
+  const result = { fetched: 0, upserted: 0, skipped: 0, errors: [], maxWatermark: null };
 
   const fkCaches = await buildFkCaches(supabase, tenantId, schema);
 
   // For tables without a natural key we delete once up front, then stream
-  // inserts in batches. The old deleteAndInsert path did this atomically;
-  // here we trade atomicity for bounded memory.
+  // inserts in batches. With the source_uq migration, all fact tables now
+  // have natural keys — this path is kept as a fallback for future tables.
   if (!schema.naturalKey) {
     const { error: delError } = await supabase
       .from(table)
@@ -113,6 +113,16 @@ export async function upsertTableStream(supabase, tenantId, table, connector, { 
         const transformed = transformRow(row(batch[i]), tenantId, schema, fkCaches);
         batch[writeIdx] = transformed;
         writeIdx++;
+
+        // Track the highest watermark timestamp across all batches
+        if (transformed.source_updated_at) {
+          const ts = transformed.source_updated_at instanceof Date
+            ? transformed.source_updated_at.toISOString()
+            : String(transformed.source_updated_at);
+          if (!result.maxWatermark || ts > result.maxWatermark) {
+            result.maxWatermark = ts;
+          }
+        }
       } catch (err) {
         result.skipped++;
         if (result.errors.length < MAX_ERRORS_STORED) {
@@ -121,6 +131,26 @@ export async function upsertTableStream(supabase, tenantId, table, connector, { 
       }
     }
     batch.length = writeIdx;
+
+    if (batch.length === 0) return;
+
+    // Deduplicate within the batch by natural key. Some views (e.g. DIM_JOB)
+    // can return duplicate display names; PostgreSQL's ON CONFLICT rejects a
+    // batch where two rows share the same conflict key.
+    if (onConflict) {
+      const keyFields = onConflict.split(',');
+      const seen = new Map();
+      for (const row of batch) {
+        const key = keyFields.map(f => row[f]).join('\x00');
+        seen.set(key, row);  // last occurrence wins
+      }
+      if (seen.size < batch.length) {
+        result.skipped += batch.length - seen.size;
+        const deduped = Array.from(seen.values());
+        batch.length = 0;
+        for (const row of deduped) batch.push(row);
+      }
+    }
 
     if (batch.length === 0) return;
 
@@ -133,7 +163,7 @@ export async function upsertTableStream(supabase, tenantId, table, connector, { 
     }
 
     result.upserted += batch.length;
-  }, { batchSize });
+  }, { batchSize, watermark, watermarkColumn, lookbackDays });
 
   // total is the raw count emitted by the connector; result.fetched should
   // match it. Trust the connector's count as the authoritative total.
@@ -286,7 +316,13 @@ function transformRow(row, tenantId, schema, fkCaches) {
       const cache = fkCaches[col];
       const uuid = cache.get(String(lookupValue));
       if (!uuid) {
-        throw new Error(`FK lookup failed: ${col} = "${lookupValue}" not found in ${fkRef.table}`);
+        // Only throw for required FK fields. Optional FK misses get null —
+        // e.g. employee.job_id when the job is inactive (not in dim_job).
+        if (schema.required.includes(col)) {
+          throw new Error(`FK lookup failed: ${col} = "${lookupValue}" not found in ${fkRef.table}`);
+        }
+        out[col] = null;
+        continue;
       }
       out[col] = uuid;
     } else if (col === 'date_key') {

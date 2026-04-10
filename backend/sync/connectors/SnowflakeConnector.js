@@ -35,20 +35,18 @@ const VIEW_MAP = {
 /**
  * Build query templates with fully qualified Wavelytics WinTeam warehouse view names.
  * Column aliases map WinTeam naming → sf_* table columns.
- * Joins use surrogate keys (JOB_KEY, EMPLOYEE_KEY).
  * :1 is the company_filter bind variable for tenant isolation.
  *
- * Verified against AAEFS_WINTEAM.WAREHOUSE DESCRIBE output (2026-03-17):
- *   DIM_JOB (103 cols)  → sf_dim_job: job_name, location, supervisor, company, tier, is_active
- *   DIM_EMPLOYEE (54)   → sf_dim_employee: employee_number, first/last_name, role, hire_date, job_name
- *   FACT_LABOR_BUDGET_TO_ACTUAL (19) → sf_fact_labor_budget_actual: job, period, budget/actual hrs/$
- *   FACT_JOB_DAILY (71) → sf_fact_job_daily: job, date, headcount (safety metrics N/A in WinTeam)
- *   FACT_WORK_SCHEDULE_TICKET (53)  → sf_fact_work_tickets: job, date, category, status, assigned_to
- *   FACT_TIMEKEEPING (55) → sf_fact_timekeeping: employee, job, date, clock in/out, reg/ot/dt hours
+ * Each fact query now includes:
+ *   - *_UQ AS source_uq — stable unique key for upsert (enables incremental)
+ *   - SOURCE_RECORD_UPDATED_TIMESTAMP AS source_updated_at — watermark for
+ *     incremental filtering (not available on FACT_WORK_SCHEDULE_TICKET,
+ *     which uses date-range lookback instead)
  */
 function buildQueryMap(fqPrefix) {
   const dj = `${fqPrefix}.DIM_JOB`;
   const de = `${fqPrefix}.DIM_EMPLOYEE`;
+  const dd = `${fqPrefix}.DIM_DATE`;
   const flba = `${fqPrefix}.FACT_LABOR_BUDGET_TO_ACTUAL`;
   const fjd = `${fqPrefix}.FACT_JOB_DAILY`;
   const fwst = `${fqPrefix}.FACT_WORK_SCHEDULE_TICKET`;
@@ -65,8 +63,7 @@ function buildQueryMap(fqPrefix) {
         NULL                            AS sq_footage,
         IS_JOB_ACTIVE_FLAG              AS is_active
       FROM ${dj}
-      WHERE IS_JOB_ACTIVE_FLAG = 1
-        AND JOB_COMPANY_NAME = :1
+      WHERE JOB_COMPANY_NAME = :1
     `,
 
     sf_dim_employee: `
@@ -84,66 +81,85 @@ function buildQueryMap(fqPrefix) {
       WHERE j.JOB_COMPANY_NAME = :1
     `,
 
+    // NOTE: All Wavelytics *_DATE_KEY columns are surrogate MD5 hashes,
+    // not real dates. We join DIM_DATE to resolve them to CALENDAR_DATE
+    // values that match our Supabase DATE columns.
+    // Similarly, *_TIME_KEY columns are surrogate hashes with no DIM_TIME
+    // view available — clock_in/clock_out are set to NULL.
+
     sf_fact_labor_budget_actual: `
       SELECT
+        f.LABOR_BUDGET_UQ       AS source_uq,
         j.JOB_NAME              AS job_name,
-        f.DATE_KEY              AS period_start,
-        f.DATE_KEY              AS period_end,
+        TO_CHAR(d.CALENDAR_DATE, 'YYYY-MM-DD') AS period_start,
+        TO_CHAR(d.CALENDAR_DATE, 'YYYY-MM-DD') AS period_end,
         f.BUDGET_HOURS          AS budget_hours,
         f.ACTUAL_HOURS          AS actual_hours,
         f.BUDGET_DOLLAR_AMOUNT  AS budget_dollars,
         f.ACTUAL_DOLLAR_AMOUNT  AS actual_dollars,
         0                       AS ot_hours,
-        0                       AS ot_dollars
+        0                       AS ot_dollars,
+        f.SOURCE_RECORD_UPDATED_TIMESTAMP AS source_updated_at
       FROM ${flba} f
       JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      JOIN ${dd} d ON d.DATE_KEY = f.DATE_KEY
       WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_job_daily: `
       SELECT
+        f.JOB_DAILY_UQ                            AS source_uq,
         j.JOB_NAME                                AS job_name,
-        f.DATE_KEY                                AS date_key,
+        TO_CHAR(d.CALENDAR_DATE, 'YYYY-MM-DD')    AS date_key,
         0                                         AS audits,
         0                                         AS corrective_actions,
         0                                         AS recordable_incidents,
         0                                         AS good_saves,
         0                                         AS near_misses,
         0                                         AS trir,
-        f.SCHEDULE_POSITION_ACTUAL_TOTAL_NUMBER   AS headcount
+        f.SCHEDULE_POSITION_ACTUAL_TOTAL_NUMBER   AS headcount,
+        f.SOURCE_RECORD_UPDATED_TIMESTAMP         AS source_updated_at
       FROM ${fjd} f
       JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      JOIN ${dd} d ON d.DATE_KEY = f.DATE_KEY
       WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_work_tickets: `
       SELECT
+        f.WORK_SCHEDULE_TICKET_UQ             AS source_uq,
         j.JOB_NAME                            AS job_name,
-        f.WORK_TICKET_SCHEDULED_DATE_KEY      AS date_key,
+        TO_CHAR(d_sched.CALENDAR_DATE, 'YYYY-MM-DD') AS date_key,
         f.WORK_SCHEDULE_TYPE_LABEL            AS category,
         f.WORK_TICKET_STATUS_LABEL            AS status,
         NULL                                  AS priority,
         f.WORK_TICKET_SUPERVISOR_DESCRIPTION  AS assigned_to,
-        f.WORK_TICKET_COMPLETED_DATE_KEY      AS completed_at
+        TO_CHAR(d_comp.CALENDAR_DATE, 'YYYY-MM-DD') AS completed_at,
+        f.DATA_AS_OF_TIMESTAMP                AS source_updated_at
       FROM ${fwst} f
       JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      JOIN ${dd} d_sched ON d_sched.DATE_KEY = f.WORK_TICKET_SCHEDULED_DATE_KEY
+      LEFT JOIN ${dd} d_comp ON d_comp.DATE_KEY = f.WORK_TICKET_COMPLETED_DATE_KEY
       WHERE j.JOB_COMPANY_NAME = :1
     `,
 
     sf_fact_timekeeping: `
       SELECT
+        f.TIMEKEEPING_UQ                AS source_uq,
         e.EMPLOYEE_NUMBER              AS employee_number,
         j.JOB_NAME                     AS job_name,
-        f.WORK_DATE_KEY                AS date_key,
-        f.IN_TIME_KEY                  AS clock_in,
-        f.OUT_TIME_KEY                 AS clock_out,
+        TO_CHAR(d.CALENDAR_DATE, 'YYYY-MM-DD') AS date_key,
+        NULL                           AS clock_in,
+        NULL                           AS clock_out,
         f.TIMEKEEPING_REGULAR_HOURS    AS regular_hours,
         f.TIMEKEEPING_OVERTIME_HOURS   AS ot_hours,
         f.TIMEKEEPING_DOUBLETIME_HOURS AS dt_hours,
-        NULL                           AS punch_status
+        NULL                           AS punch_status,
+        f.SOURCE_RECORD_UPDATED_TIMESTAMP AS source_updated_at
       FROM ${ft} f
       JOIN ${de} e ON e.EMPLOYEE_KEY = f.EMPLOYEE_KEY
       JOIN ${dj} j ON j.JOB_KEY = f.JOB_KEY
+      JOIN ${dd} d ON d.DATE_KEY = f.WORK_DATE_KEY
       WHERE j.JOB_COMPANY_NAME = :1
     `,
   };
@@ -239,9 +255,18 @@ export default class SnowflakeConnector extends BaseConnector {
    * runs so downstream upserts apply back-pressure to the Snowflake SDK
    * and peak memory stays at O(batchSize) regardless of table size.
    *
+   * Options:
+   *   batchSize        — rows per batch (default 500)
+   *   watermark        — ISO timestamp; if set, only rows updated after this
+   *                      time are fetched (via watermarkColumn filter)
+   *   watermarkColumn  — Snowflake column name for timestamp-based watermark
+   *                      (e.g. 'SOURCE_RECORD_UPDATED_TIMESTAMP')
+   *   lookbackDays     — alternative to watermark: pull rows where scheduled
+   *                      date is within this many days of today (via DIM_DATE)
+   *
    * Resolves with the total row count after the final batch is processed.
    */
-  async fetchTableBatched(targetTable, onBatch, { batchSize = 500 } = {}) {
+  async fetchTableBatched(targetTable, onBatch, { batchSize = 500, watermark = null, watermarkColumn = null, lookbackDays = null } = {}) {
     if (!this.connection) throw new Error('Not connected');
 
     const queryTemplate = this.queryMap?.[targetTable];
@@ -249,10 +274,24 @@ export default class SnowflakeConnector extends BaseConnector {
       throw new Error(`No Snowflake query mapped for table: ${targetTable}`);
     }
 
+    // Build the final SQL with optional incremental filter
+    let sqlText = queryTemplate;
+    const binds = [this.config.company_filter];
+
+    if (watermark && watermarkColumn) {
+      // Timestamp-based incremental: only rows modified since the watermark
+      binds.push(watermark);
+      sqlText += `\n        AND f.${watermarkColumn} >= :${binds.length}`;
+    } else if (lookbackDays && lookbackDays > 0) {
+      // Date-range lookback: only rows scheduled within lookbackDays of today
+      // Uses the d_sched alias added to the FACT_WORK_SCHEDULE_TICKET query
+      sqlText += `\n        AND d_sched.CALENDAR_DATE >= DATEADD(day, -${Number(lookbackDays)}, CURRENT_DATE())`;
+    }
+
     return await new Promise((resolve, reject) => {
       this.connection.execute({
-        sqlText: queryTemplate,
-        binds: [this.config.company_filter],
+        sqlText,
+        binds,
         streamResult: true,
         complete: (err, stmt) => {
           if (err) {

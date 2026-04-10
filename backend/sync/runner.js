@@ -129,12 +129,33 @@ export async function runSync(supabase, syncConfig, options = {}) {
     // the classic buffered path.
     const supportsStreaming = typeof connector.fetchTableBatched === 'function';
 
+    // Load watermarks for incremental sync (Snowflake only)
+    const watermarks = syncConfig.sync_watermarks || {};
+    const updatedWatermarks = { ...watermarks };
+
     for (const table of effectiveTables) {
       let rows = null;
       try {
         let result;
         if (supportsStreaming) {
-          result = await upsertTableStream(supabase, tenantId, table, connector);
+          // Resolve incremental options from schema + stored watermarks
+          const tableSchema = getTableSchema(table);
+          const streamOpts = {};
+          if (tableSchema.watermarkColumn && watermarks[table]) {
+            streamOpts.watermark = watermarks[table];
+            streamOpts.watermarkColumn = tableSchema.watermarkColumn;
+          } else if (tableSchema.lookbackDays && watermarks[table]) {
+            // Table has been seeded before — use lookback window
+            streamOpts.lookbackDays = tableSchema.lookbackDays;
+          }
+          // If no watermark stored yet → full pull (seed)
+
+          result = await upsertTableStream(supabase, tenantId, table, connector, streamOpts);
+
+          // Save the new high-watermark for next run
+          if (result.maxWatermark) {
+            updatedWatermarks[table] = result.maxWatermark;
+          }
         } else {
           rows = await fetchWithRetry(connector, table);
           if (rows.length === 0) {
@@ -156,6 +177,14 @@ export async function runSync(supabase, syncConfig, options = {}) {
         // GC can reclaim memory before starting the next table.
         rows = null;
       }
+    }
+
+    // Persist updated watermarks so the next run can be incremental
+    if (syncConfig.id && Object.keys(updatedWatermarks).length > 0) {
+      await supabase
+        .from('sync_configs')
+        .update({ sync_watermarks: updatedWatermarks })
+        .eq('id', syncConfig.id);
     }
   } catch (err) {
     errors.push({ error: err.message });

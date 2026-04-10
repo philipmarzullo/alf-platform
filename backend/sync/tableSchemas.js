@@ -1,7 +1,13 @@
 /**
  * Registry of sf_* table schemas for the sync layer.
  * Defines columns, required fields, natural keys, FK references, and sync order.
- * Sourced from migration 20260228000300_dashboards_sf_tables.sql.
+ *
+ * Natural keys: every fact table now uses source_uq (the Wavelytics *_UQ column)
+ * as a stable unique identifier, enabling upsert-based incremental sync instead
+ * of the old delete-and-insert path.
+ *
+ * Watermark: tables with a `watermarkColumn` support incremental sync via
+ * SOURCE_RECORD_UPDATED_TIMESTAMP filtering.
  */
 
 const TABLE_SCHEMAS = {
@@ -21,6 +27,7 @@ const TABLE_SCHEMAS = {
     naturalKey: ['tenant_id', 'job_name'],
     tenantScoped: true,
     fks: {},
+    watermarkColumn: 'SOURCE_RECORD_UPDATED_TIMESTAMP',
   },
 
   sf_dim_employee: {
@@ -32,54 +39,61 @@ const TABLE_SCHEMAS = {
     fks: {
       job_id: { table: 'sf_dim_job', lookupColumn: 'job_name' },
     },
+    watermarkColumn: 'SOURCE_RECORD_UPDATED_TIMESTAMP',
   },
 
   sf_fact_labor_budget_actual: {
     syncOrder: 3,
-    columns: ['job_id', 'period_start', 'period_end', 'budget_hours', 'actual_hours', 'budget_dollars', 'actual_dollars', 'ot_hours', 'ot_dollars'],
-    required: ['job_id', 'period_start', 'period_end'],
-    naturalKey: ['tenant_id', 'job_id', 'period_start', 'period_end'],
+    columns: ['source_uq', 'job_id', 'period_start', 'period_end', 'budget_hours', 'actual_hours', 'budget_dollars', 'actual_dollars', 'ot_hours', 'ot_dollars', 'source_updated_at'],
+    required: ['source_uq', 'job_id', 'period_start', 'period_end'],
+    naturalKey: ['tenant_id', 'source_uq'],
     tenantScoped: true,
     fks: {
       job_id: { table: 'sf_dim_job', lookupColumn: 'job_name' },
     },
+    watermarkColumn: 'SOURCE_RECORD_UPDATED_TIMESTAMP',
   },
 
   sf_fact_job_daily: {
     syncOrder: 4,
-    columns: ['job_id', 'date_key', 'audits', 'corrective_actions', 'recordable_incidents', 'good_saves', 'near_misses', 'trir', 'headcount'],
-    required: ['job_id', 'date_key'],
-    naturalKey: ['tenant_id', 'job_id', 'date_key'],
+    columns: ['source_uq', 'job_id', 'date_key', 'audits', 'corrective_actions', 'recordable_incidents', 'good_saves', 'near_misses', 'trir', 'headcount', 'source_updated_at'],
+    required: ['source_uq', 'job_id', 'date_key'],
+    naturalKey: ['tenant_id', 'source_uq'],
     tenantScoped: true,
     fks: {
       job_id: { table: 'sf_dim_job', lookupColumn: 'job_name' },
       date_key: { table: 'sf_dim_date', lookupColumn: 'date_key' },
     },
+    watermarkColumn: 'SOURCE_RECORD_UPDATED_TIMESTAMP',
   },
 
   sf_fact_work_tickets: {
     syncOrder: 5,
-    columns: ['job_id', 'date_key', 'category', 'status', 'priority', 'assigned_to', 'completed_at'],
-    required: ['job_id', 'date_key', 'category', 'status'],
-    naturalKey: null,  // no clean natural key — uses delete+insert
+    columns: ['source_uq', 'job_id', 'date_key', 'category', 'status', 'priority', 'assigned_to', 'completed_at', 'source_updated_at'],
+    required: ['source_uq', 'job_id', 'date_key', 'category', 'status'],
+    naturalKey: ['tenant_id', 'source_uq'],
     tenantScoped: true,
     fks: {
       job_id: { table: 'sf_dim_job', lookupColumn: 'job_name' },
       date_key: { table: 'sf_dim_date', lookupColumn: 'date_key' },
     },
+    // No SOURCE_RECORD_UPDATED_TIMESTAMP — uses date-range lookback instead
+    watermarkColumn: null,
+    lookbackDays: 90,
   },
 
   sf_fact_timekeeping: {
     syncOrder: 6,
-    columns: ['employee_id', 'job_id', 'date_key', 'clock_in', 'clock_out', 'regular_hours', 'ot_hours', 'dt_hours', 'punch_status'],
-    required: ['employee_id', 'job_id', 'date_key'],
-    naturalKey: null,  // no clean natural key — uses delete+insert
+    columns: ['source_uq', 'employee_id', 'job_id', 'date_key', 'clock_in', 'clock_out', 'regular_hours', 'ot_hours', 'dt_hours', 'punch_status', 'source_updated_at'],
+    required: ['source_uq', 'employee_id', 'job_id', 'date_key'],
+    naturalKey: ['tenant_id', 'source_uq'],
     tenantScoped: true,
     fks: {
       employee_id: { table: 'sf_dim_employee', lookupColumn: 'employee_number' },
       job_id: { table: 'sf_dim_job', lookupColumn: 'job_name' },
       date_key: { table: 'sf_dim_date', lookupColumn: 'date_key' },
     },
+    watermarkColumn: 'SOURCE_RECORD_UPDATED_TIMESTAMP',
   },
 };
 
