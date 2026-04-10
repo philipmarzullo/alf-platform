@@ -39,6 +39,7 @@ import ingestionRouter from './routes/ingestion.js';
 import rfpRouter from './routes/rfp.js';
 import wcClaimsRouter from './routes/wcClaims.js';
 import opsWorkspaceRouter from './routes/opsWorkspace.js';
+import financeWorkspaceRouter from './routes/financeWorkspace.js';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -135,6 +136,7 @@ app.use('/api/ingestion', auth, ingestionRouter);
 app.use('/api/rfp', auth, rfpRouter);
 app.use('/api/wc-claims', auth, wcClaimsRouter);
 app.use('/api/ops-workspace', auth, opsWorkspaceRouter);
+app.use('/api/finance-workspace', auth, financeWorkspaceRouter);
 
 // --- 404 ---
 app.use((req, res) => {
