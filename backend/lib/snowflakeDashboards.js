@@ -774,4 +774,4 @@ async function getSnowflakeDomainData(supabase, tenantId, domain, filters) {
   }
 }
 
-export { SNOWFLAKE_DOMAINS, getSnowflakeDomainData };
+export { SNOWFLAKE_DOMAINS, getSnowflakeDomainData, getConnector, fq };
