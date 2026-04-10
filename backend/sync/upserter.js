@@ -154,12 +154,35 @@ export async function upsertTableStream(supabase, tenantId, table, connector, { 
 
     if (batch.length === 0) return;
 
-    const { error: opError } = schema.naturalKey
-      ? await supabase.from(table).upsert(batch, { onConflict })
-      : await supabase.from(table).insert(batch);
+    // Retry with exponential backoff for transient errors (Cloudflare 500s,
+    // Supabase rate limits). Without this, a single gateway hiccup during a
+    // multi-million-row seed terminates the entire table sync.
+    const op = schema.naturalKey ? 'upsert' : 'insert';
+    let lastError;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const { error: opError } = schema.naturalKey
+        ? await supabase.from(table).upsert(batch, { onConflict })
+        : await supabase.from(table).insert(batch);
 
-    if (opError) {
-      throw new Error(`Batch ${schema.naturalKey ? 'upsert' : 'insert'} failed on ${table}: ${opError.message}`);
+      if (!opError) {
+        lastError = null;
+        break;
+      }
+
+      lastError = opError;
+      // Only retry on server errors (5xx / HTML responses from Cloudflare)
+      const msg = opError.message || '';
+      const isTransient = msg.includes('500') || msg.includes('502') || msg.includes('503') ||
+        msg.includes('504') || msg.includes('Internal Server Error') || msg.includes('<html');
+      if (!isTransient) break; // Don't retry client errors (4xx)
+
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+      console.warn(`[upserter] ${op} on ${table} attempt ${attempt}/5 failed (transient), retrying in ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    if (lastError) {
+      throw new Error(`Batch ${op} failed on ${table}: ${lastError.message}`);
     }
 
     result.upserted += batch.length;
