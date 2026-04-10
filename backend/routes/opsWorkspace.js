@@ -364,6 +364,10 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
       totalAbsenceHours:  Math.round(Number(abs.total_absence_hours) || 0),
       terminations,
       totalHours:         Math.round(totalHours),
+      // Flags so frontend can distinguish "no data in period" from real zeros
+      hasTurnoverData:    totalEmployees > 0,
+      hasOvertimeData:    totalHours > 0,
+      hasAbsenceData:     (Number(abs.employees_with_absences) || 0) > 0,
     });
   } catch (err) {
     console.error('ops-workspace workforce-kpis error:', err);
@@ -436,27 +440,44 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
     const prefix = fq(config);
     const binds = [config.company_filter];
 
-    const conditions = [`l.TENANT_ID = :1`, `j.TENANT_ID = :1`];
-    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
-    conditions.push(...addJobTierFilters('j', { vp, manager }, binds));
+    function buildFinancialSql(applyDates) {
+      const b = [config.company_filter];
+      const c = [`l.TENANT_ID = :1`, `j.TENANT_ID = :1`];
+      if (applyDates) c.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, b));
+      c.push(...addJobTierFilters('j', { vp, manager }, b));
+      const s = `
+        SELECT
+          SUM(l.ACTUAL_DOLLAR_AMOUNT)  AS actual_labor,
+          SUM(l.BUDGET_DOLLAR_AMOUNT)  AS budget_labor,
+          SUM(l.ACTUAL_HOURS)          AS actual_hours,
+          SUM(l.BUDGET_HOURS)          AS budget_hours
+        FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
+        JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
+        JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
+        WHERE ${c.join(' AND ')}
+      `;
+      return { sql: s, binds: b };
+    }
 
-    const sql = `
-      SELECT
-        SUM(l.ACTUAL_DOLLAR_AMOUNT)  AS actual_labor,
-        SUM(l.BUDGET_DOLLAR_AMOUNT)  AS budget_labor,
-        SUM(l.ACTUAL_HOURS)          AS actual_hours,
-        SUM(l.BUDGET_HOURS)          AS budget_hours
-      FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
-      JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
-      JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
-      WHERE ${conditions.join(' AND ')}
-    `;
+    // Try with date filter first
+    const dated = buildFinancialSql(true);
+    let rows = await connector.queryView(dated.sql, dated.binds);
+    let r = rows[0] || {};
+    let dateFiltered = true;
 
-    const rows = await connector.queryView(sql, binds);
-    const r = rows[0] || {};
+    let actual = Number(r.actual_labor) || 0;
+    let budget = Number(r.budget_labor) || 0;
 
-    const actual = Number(r.actual_labor) || 0;
-    const budget = Number(r.budget_labor) || 0;
+    // Fallback: if no data in selected period, re-run all-time
+    if (actual === 0 && budget === 0) {
+      const allTime = buildFinancialSql(false);
+      rows = await connector.queryView(allTime.sql, allTime.binds);
+      r = rows[0] || {};
+      actual = Number(r.actual_labor) || 0;
+      budget = Number(r.budget_labor) || 0;
+      dateFiltered = false;
+    }
+
     const variance = budget ? Math.round(((actual - budget) / budget) * 100 * 10) / 10 : 0;
 
     res.json({
@@ -466,6 +487,8 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       actualHours:        Math.round(Number(r.actual_hours) || 0),
       budgetHours:        Math.round(Number(r.budget_hours) || 0),
       hasData:            actual > 0 || budget > 0,
+      dateFiltered,
+      note:               dateFiltered ? null : 'No data in selected date range — showing all-time totals',
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
