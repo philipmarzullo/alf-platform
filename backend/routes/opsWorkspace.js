@@ -646,7 +646,9 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
     const bluCond = [`j.JOB_COMPANY_NAME = :1`, jobSuffixFilter('j'), `l.BUDGET_DOLLAR_AMOUNT > 0`];
     bluCond.push(...addJobTierFilters('j', { vp, manager, jobName },bluBinds));
     const bluSql = `
-      SELECT MAX(l.SOURCE_RECORD_UPDATED_TIMESTAMP) AS last_budget_update
+      SELECT
+        MAX(l.SOURCE_RECORD_UPDATED_TIMESTAMP) AS last_budget_update,
+        MIN(l.SOURCE_RECORD_UPDATED_TIMESTAMP) AS oldest_budget_update
       FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
       JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
       WHERE ${bluCond.join(' AND ')}
@@ -692,6 +694,7 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       hasBudgetData,
       hasPayrollData: totalPayroll > 0 || totalHours > 0,
       budgetLastUpdated: blu.last_budget_update || null,
+      oldestBudgetUpdate: blu.oldest_budget_update || null,
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
