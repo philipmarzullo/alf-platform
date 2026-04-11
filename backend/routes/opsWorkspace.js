@@ -200,24 +200,37 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       GROUP BY j2.JOB_TIER_08_CURRENT_VALUE_LABEL
     `;
 
-    // Claims per VP (from Supabase wc_claims)
-    const { data: claims } = await req.supabase
+    // Claims per VP (resolve VP live from DIM_JOB via job_number)
+    const claimsPromise = req.supabase
       .from('wc_claims')
-      .select('vp, claim_status')
+      .select('job_number, claim_status, date_of_loss')
       .eq('tenant_id', tenantId);
+
+    const vpLookupSql = `SELECT JOB_NUMBER, JOB_TIER_08_CURRENT_VALUE_LABEL AS vp FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1`;
+
+    const [inspRows, payRows, vpLookupRows, claimsResult] = await Promise.all([
+      connector.queryView(inspSql, binds),
+      connector.queryView(payrollSql, payBinds),
+      connector.queryView(vpLookupSql, [config.company_filter]),
+      claimsPromise,
+    ]);
+
+    // Build job_number → VP lookup
+    const jobToVp = {};
+    for (const r of vpLookupRows) {
+      const jn = String(r.job_number || r.JOB_NUMBER || '').trim();
+      if (jn) jobToVp[jn] = r.vp || r.VP;
+    }
+
     const claimsByVp = {};
-    for (const c of (claims || [])) {
+    for (const c of (claimsResult.data || [])) {
       if (startDate && (!c.date_of_loss || c.date_of_loss < startDate)) continue;
       if (endDate && (!c.date_of_loss || c.date_of_loss > endDate)) continue;
       if (c.claim_status === 'Open') {
-        claimsByVp[c.vp] = (claimsByVp[c.vp] || 0) + 1;
+        const resolvedVp = jobToVp[String(c.job_number || '').trim()] || null;
+        if (resolvedVp) claimsByVp[resolvedVp] = (claimsByVp[resolvedVp] || 0) + 1;
       }
     }
-
-    const [inspRows, payRows] = await Promise.all([
-      connector.queryView(inspSql, binds),
-      connector.queryView(payrollSql, payBinds),
-    ]);
 
     // Build payroll lookup
     const payLookup = {};
@@ -617,14 +630,13 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       WHERE ${budCond.join(' AND ')}
     `;
 
-    // Budget last updated
+    // Budget last updated (actual modification timestamp from WinTeam)
     const bluBinds = [config.company_filter];
     const bluCond = [`j.JOB_COMPANY_NAME = :1`, `l.BUDGET_DOLLAR_AMOUNT > 0`];
     bluCond.push(...addJobTierFilters('j', { vp, manager, jobNumber }, bluBinds));
     const bluSql = `
-      SELECT MAX(d.CALENDAR_DATE) AS last_budget_date
+      SELECT MAX(l.SOURCE_RECORD_UPDATED_TIMESTAMP) AS last_budget_update
       FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
-      JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
       JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
       WHERE ${bluCond.join(' AND ')}
     `;
@@ -668,7 +680,7 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       laborVariancePct,
       hasBudgetData,
       hasPayrollData: totalPayroll > 0 || totalHours > 0,
-      budgetLastUpdated: blu.last_budget_date || null,
+      budgetLastUpdated: blu.last_budget_update || null,
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
@@ -860,8 +872,7 @@ router.get('/:tenantId/site-deficiencies', async (req, res) => {
 });
 
 // ─── GET /:tenantId/safety-kpis ─────────────────────────────────────────────
-// Reads from Supabase wc_claims (same source as Safety Workspace).
-// Filters by VP / manager (supervisor) / job_number / date range.
+// Reads from Supabase wc_claims, resolves VP/Manager live from DIM_JOB.
 
 router.get('/:tenantId/safety-kpis', async (req, res) => {
   try {
@@ -869,16 +880,34 @@ router.get('/:tenantId/safety-kpis', async (req, res) => {
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
     const { startDate, endDate, vp, manager, jobNumber } = req.query;
 
-    const { data: claims, error } = await req.supabase
-      .from('wc_claims')
-      .select('*')
-      .eq('tenant_id', tenantId);
-    if (error) throw error;
+    // Fetch claims and DIM_JOB in parallel for live VP/Manager resolution
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
 
-    // Apply filters in JS (table is small — a few hundred rows max)
-    const filtered = (claims || []).filter(c => {
-      if (vp && vp !== 'all' && c.vp !== vp) return false;
-      if (manager && manager !== 'all' && c.supervisor !== manager) return false;
+    const [claimsResult, dimRows] = await Promise.all([
+      req.supabase.from('wc_claims').select('*').eq('tenant_id', tenantId),
+      connector.queryView(
+        `SELECT JOB_NUMBER, JOB_TIER_08_CURRENT_VALUE_LABEL AS vp, JOB_TIER_03_CURRENT_VALUE_LABEL AS manager FROM ${prefix}.DIM_JOB WHERE JOB_COMPANY_NAME = :1`,
+        [config.company_filter]
+      ),
+    ]);
+    if (claimsResult.error) throw claimsResult.error;
+    const claims = claimsResult.data || [];
+
+    // Build job_number → { vp, manager } lookup from live DIM_JOB
+    const jobLookup = {};
+    for (const r of dimRows) {
+      const jn = String(r.job_number || r.JOB_NUMBER || '').trim();
+      if (jn) jobLookup[jn] = { vp: r.vp || r.VP, manager: r.manager || r.MANAGER };
+    }
+
+    // Apply filters in JS using live VP/Manager from DIM_JOB
+    const filtered = claims.filter(c => {
+      const dim = jobLookup[String(c.job_number || '').trim()] || {};
+      const claimVp = dim.vp || c.vp;
+      const claimManager = dim.manager || c.supervisor;
+      if (vp && vp !== 'all' && claimVp !== vp) return false;
+      if (manager && manager !== 'all' && claimManager !== manager) return false;
       if (jobNumber && jobNumber !== 'all' && String(c.job_number) !== String(jobNumber)) return false;
       if (startDate && (!c.date_of_loss || c.date_of_loss < startDate)) return false;
       if (endDate && (!c.date_of_loss || c.date_of_loss > endDate)) return false;
@@ -1109,7 +1138,7 @@ router.get('/:tenantId/sites-by-deficiency', async (req, res) => {
 });
 
 // ─── GET /:tenantId/days-since-inspection ────────────────────────────────────
-// Active sites not inspected in > 30 days, sorted by days since last inspection
+// All active jobs: days since last inspection (LEFT JOIN to include never-inspected)
 
 router.get('/:tenantId/days-since-inspection', async (req, res) => {
   try {
@@ -1121,16 +1150,16 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
     const prefix = fq(config);
     const binds = [config.company_filter];
 
-    const conditions = [
+    const jobConditions = [
       `j.JOB_COMPANY_NAME = :1`,
-      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
-      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
       `j.IS_JOB_ACTIVE_FLAG = 1`,
     ];
-    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+    jobConditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
-    const activeFilter = activeOnly !== 'false'
-      ? `AND DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) <= 730`
+    // activeOnly: include jobs inspected within 2 years OR never inspected (9999)
+    const havingClause = activeOnly !== 'false'
+      ? `HAVING COALESCE(DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()), 9999) <= 730
+              OR MAX(d.CALENDAR_DATE) IS NULL`
       : '';
 
     const sql = `
@@ -1140,16 +1169,22 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
         j.JOB_TIER_08_CURRENT_VALUE_LABEL       AS vp,
         j.JOB_TIER_03_CURRENT_VALUE_LABEL       AS manager,
         MAX(d.CALENDAR_DATE)                    AS last_inspection_date,
-        DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) AS days_since
-      FROM ${prefix}.FACT_CHECKPOINT c
-      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
-      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
-      WHERE ${conditions.join(' AND ')}
+        CASE
+          WHEN MAX(d.CALENDAR_DATE) IS NULL THEN 9999
+          ELSE DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE())
+        END                                     AS days_since
+      FROM ${prefix}.DIM_JOB j
+      LEFT JOIN ${prefix}.FACT_CHECKPOINT c
+        ON j.JOB_KEY = c.JOB_KEY
+        AND c.IS_CHECKPOINT_COMPLETED_FLAG = 1
+        AND c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'
+      LEFT JOIN ${prefix}.DIM_DATE d
+        ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      WHERE ${jobConditions.join(' AND ')}
       GROUP BY j.JOB_NAME, j.JOB_NUMBER,
                j.JOB_TIER_08_CURRENT_VALUE_LABEL,
                j.JOB_TIER_03_CURRENT_VALUE_LABEL
-      HAVING DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) > 30
-        ${activeFilter}
+      ${havingClause}
       ORDER BY days_since DESC
     `;
 
@@ -1161,7 +1196,7 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
         jobNumber:          r.job_number,
         vp:                 r.vp,
         manager:            r.manager,
-        lastInspectionDate: r.last_inspection_date,
+        lastInspectionDate: r.last_inspection_date || null,
         daysSince:          Number(r.days_since) || 0,
       })),
     });
