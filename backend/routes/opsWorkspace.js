@@ -520,13 +520,17 @@ router.get('/:tenantId/quality-kpis', async (req, res) => {
     const conditions = [
       `j.JOB_COMPANY_NAME = :1`,
       `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
     ];
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
     const sql = `
       SELECT
-        ROUND(AVG(c.CHECKPOINT_SCORE_PERCENT), 1)              AS avg_score,
+        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN (
+          'Safety Inspection','Safety Inspection old',
+          'Level 1 (Spotless) Inspection','Level 2 (Tidy) Inspection'
+        ) THEN c.CHECKPOINT_SCORE_PERCENT END), 1)                AS avg_score,
         COUNT(DISTINCT c.CHECKPOINT_ID)                        AS total_inspections,
         COUNT(DISTINCT CASE WHEN c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
               THEN c.CHECKPOINT_ID END)                        AS passed_inspections,
@@ -613,21 +617,18 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       WHERE ${budCond.join(' AND ')}
     `;
 
-    // Budget last updated (only when a specific job is selected)
-    let budgetLastUpdatedPromise = Promise.resolve([]);
-    if (jobNumber && jobNumber !== 'all') {
-      const bluBinds = [config.company_filter, jobNumber];
-      const bluSql = `
-        SELECT MAX(d.CALENDAR_DATE) AS last_budget_date
-        FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
-        JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
-        JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
-        WHERE j.JOB_COMPANY_NAME = :1
-          AND j.JOB_NUMBER = :2
-          AND l.BUDGET_DOLLAR_AMOUNT > 0
-      `;
-      budgetLastUpdatedPromise = connector.queryView(bluSql, bluBinds);
-    }
+    // Budget last updated
+    const bluBinds = [config.company_filter];
+    const bluCond = [`j.JOB_COMPANY_NAME = :1`, `l.BUDGET_DOLLAR_AMOUNT > 0`];
+    bluCond.push(...addJobTierFilters('j', { vp, manager, jobNumber }, bluBinds));
+    const bluSql = `
+      SELECT MAX(d.CALENDAR_DATE) AS last_budget_date
+      FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
+      JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
+      WHERE ${bluCond.join(' AND ')}
+    `;
+    const budgetLastUpdatedPromise = connector.queryView(bluSql, bluBinds);
 
     const [payRows, budRows, bluRows] = await Promise.all([
       connector.queryView(payrollSql, payBinds),
@@ -1166,6 +1167,241 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
     });
   } catch (err) {
     console.error('ops-workspace days-since-inspection error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/absence-detail ────────────────────────────────────────────
+// Detail list of unexcused absences for drill-through panel
+
+router.get('/:tenantId/absence-detail', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [`j.JOB_COMPANY_NAME = :1`, `a.IS_ABSENT_UNEXCUSED_FLAG = 1`];
+    if (startDate) { binds.push(startDate); conditions.push(`a.ABSENCE_DATE >= :${binds.length}`); }
+    if (endDate)   { binds.push(endDate);   conditions.push(`a.ABSENCE_DATE <= :${binds.length}`); }
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        e.EMPLOYEE_FIRST_NAME || ' ' || e.EMPLOYEE_LAST_NAME AS employee_name,
+        j.JOB_NAME,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL AS manager,
+        a.ABSENCE_DATE,
+        a.ABSENCE_REASON_LABEL,
+        a.ABSENCE_TOTAL_HOURS
+      FROM ${prefix}.FACT_EMPLOYEE_ABSENCE a
+      JOIN ${prefix}.DIM_EMPLOYEE e ON a.EMPLOYEE_KEY = e.EMPLOYEE_KEY
+      JOIN ${prefix}.DIM_JOB j ON a.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY a.ABSENCE_DATE DESC
+      LIMIT 200
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      rows: rows.map(r => ({
+        employeeName:  r.employee_name,
+        jobName:       r.job_name,
+        vp:            r.vp,
+        manager:       r.manager,
+        absenceDate:   r.absence_date,
+        reason:        r.absence_reason_label || 'Unexcused',
+        hours:         Number(r.absence_total_hours) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace absence-detail error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/open-deficiencies-detail ──────────────────────────────────
+// Detail list of open deficiencies for drill-through panel
+
+router.get('/:tenantId/open-deficiencies-detail', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `li.IS_CHECKPOINT_ITEM_DEFICIENCY_OPEN_FLAG = 1`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        j.JOB_NAME,
+        j.JOB_NUMBER,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL AS manager,
+        li.CHECKPOINT_AREA_TYPE_LABEL AS area_type,
+        li.CHECKPOINT_AREA_LABEL AS area,
+        li.CHECKPOINT_ITEM_LABEL AS item,
+        li.CHECKPOINT_ITEM_DEFICIENCY_DETAIL_TEXT AS detail,
+        d.CALENDAR_DATE AS inspection_date,
+        DATEDIFF('day', d.CALENDAR_DATE, CURRENT_DATE()) AS days_open
+      FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+      JOIN ${prefix}.FACT_CHECKPOINT c ON li.CHECKPOINT_KEY = c.CHECKPOINT_KEY
+      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY days_open DESC
+      LIMIT 300
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      rows: rows.map(r => ({
+        jobName:        r.job_name,
+        jobNumber:      r.job_number,
+        vp:             r.vp,
+        manager:        r.manager,
+        areaType:       r.area_type || '',
+        area:           r.area || '',
+        item:           r.item || '',
+        detail:         r.detail || '',
+        inspectionDate: r.inspection_date,
+        daysOpen:       Number(r.days_open) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace open-deficiencies-detail error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/sites-below-objective ─────────────────────────────────────
+// Sites with inspections below their objective score
+
+router.get('/:tenantId/sites-below-objective', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ('Safety Inspection','Safety Inspection old','Level 1 (Spotless) Inspection','Level 2 (Tidy) Inspection','DO NOT USE - INACTIVE','Property Received','Medical Inspection','Tesla Daily/Nightly Report','LIU Daily/Nightly Report','Byte Dance Daily/Nightly Report','Honda Employee Use Only','CIMS Self-Audit')`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        j.JOB_NAME,
+        j.JOB_NUMBER,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL AS manager,
+        ROUND(AVG(c.CHECKPOINT_SCORE_PERCENT), 1) AS avg_score,
+        ROUND(AVG(c.CHECKPOINT_OBJECTIVE_SCORE_PERCENT), 1) AS objective,
+        COUNT(CASE WHEN c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 1 THEN 1 END) AS below_count,
+        COUNT(*) AS total_inspections
+      FROM ${prefix}.FACT_CHECKPOINT c
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY j.JOB_NAME, j.JOB_NUMBER,
+               j.JOB_TIER_08_CURRENT_VALUE_LABEL,
+               j.JOB_TIER_03_CURRENT_VALUE_LABEL
+      HAVING COUNT(CASE WHEN c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 1 THEN 1 END) > 0
+      ORDER BY below_count DESC
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      rows: rows.map(r => ({
+        jobName:          r.job_name,
+        jobNumber:        r.job_number,
+        vp:               r.vp,
+        manager:          r.manager,
+        avgScore:         Number(r.avg_score) || 0,
+        objective:        Number(r.objective) || 0,
+        belowCount:       Number(r.below_count) || 0,
+        totalInspections: Number(r.total_inspections) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace sites-below-objective error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/turnover-detail ───────────────────────────────────────────
+// Terminated/inactive employees in period for drill-through panel
+
+router.get('/:tenantId/turnover-detail', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [`j.JOB_COMPANY_NAME = :1`];
+    if (startDate) { binds.push(startDate); conditions.push(`h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP >= :${binds.length}`); }
+    if (endDate)   { binds.push(endDate);   conditions.push(`h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP <= :${binds.length}`); }
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        e.EMPLOYEE_FIRST_NAME || ' ' || e.EMPLOYEE_LAST_NAME AS employee_name,
+        es.EMPLOYEE_STATUS_LABEL AS status,
+        j.JOB_NAME,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL AS manager,
+        h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP AS effective_date
+      FROM ${prefix}.FACT_EMPLOYEE_STATUS_HISTORY h
+      JOIN ${prefix}.DIM_EMPLOYEE e ON h.EMPLOYEE_KEY = e.EMPLOYEE_KEY
+      JOIN ${prefix}.DIM_EMPLOYEE_STATUS es ON h.EMPLOYEE_STATUS_KEY = es.EMPLOYEE_STATUS_KEY
+      JOIN ${prefix}.DIM_JOB j ON h.PRIMARY_JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+        AND (es.EMPLOYEE_STATUS_LABEL ILIKE '%terminat%'
+          OR es.EMPLOYEE_STATUS_LABEL ILIKE '%inactive%')
+      ORDER BY h.EMPLOYEE_EVENT_EFFECTIVE_FROM_TIMESTAMP DESC
+      LIMIT 200
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      rows: rows.map(r => ({
+        employeeName:  r.employee_name,
+        status:        r.status,
+        jobName:       r.job_name,
+        vp:            r.vp,
+        manager:       r.manager,
+        effectiveDate: r.effective_date,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace turnover-detail error:', err);
     res.status(500).json({ error: err.message });
   }
 });
