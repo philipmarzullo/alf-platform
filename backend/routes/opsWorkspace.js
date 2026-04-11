@@ -871,4 +871,242 @@ router.get('/:tenantId/safety-kpis', async (req, res) => {
   }
 });
 
+// ─── GET /:tenantId/deficiency-trend ─────────────────────────────────────────
+// Weekly deficiency % for bar chart (Inspection Dashboard tab)
+
+router.get('/:tenantId/deficiency-trend', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        DATE_TRUNC('week', d.CALENDAR_DATE)   AS week_start,
+        ROUND(
+          SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) * 100.0 /
+          NULLIF(COUNT(*), 0)
+        , 2)                                   AS deficiency_pct,
+        COUNT(*)                               AS total_items,
+        SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items
+      FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+      JOIN ${prefix}.FACT_CHECKPOINT c ON li.CHECKPOINT_KEY = c.CHECKPOINT_KEY
+      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY week_start
+      ORDER BY week_start
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      weeks: rows.map(r => ({
+        weekStart:      r.week_start,
+        deficiencyPct:  Number(r.deficiency_pct) || 0,
+        totalItems:     Number(r.total_items) || 0,
+        deficientItems: Number(r.deficient_items) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace deficiency-trend error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/deficiency-by-area ───────────────────────────────────────
+// Top 10 areas by deficiency rate (horizontal bar chart)
+
+router.get('/:tenantId/deficiency-by-area', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
+      `li.CHECKPOINT_AREA_LABEL IS NOT NULL`,
+      `li.CHECKPOINT_AREA_LABEL != ''`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        li.CHECKPOINT_AREA_LABEL                AS area,
+        li.CHECKPOINT_AREA_TYPE_LABEL           AS area_type,
+        COUNT(*)                                AS total_items,
+        SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items,
+        ROUND(
+          SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) * 100.0 /
+          NULLIF(COUNT(*), 0)
+        , 1)                                    AS deficiency_pct
+      FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+      JOIN ${prefix}.FACT_CHECKPOINT c ON li.CHECKPOINT_KEY = c.CHECKPOINT_KEY
+      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY li.CHECKPOINT_AREA_LABEL, li.CHECKPOINT_AREA_TYPE_LABEL
+      ORDER BY deficiency_pct DESC
+      LIMIT 10
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      areas: rows.map(r => ({
+        area:           r.area,
+        areaType:       r.area_type || '',
+        totalItems:     Number(r.total_items) || 0,
+        deficientItems: Number(r.deficient_items) || 0,
+        deficiencyPct:  Number(r.deficiency_pct) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace deficiency-by-area error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/sites-by-deficiency ──────────────────────────────────────
+// Sites sorted by deficiency % descending
+
+router.get('/:tenantId/sites-by-deficiency', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { startDate, endDate, vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `c.CHECKPOINT_TEMPLATE_DESCRIPTION NOT IN ${INSPECTION_EXCLUSIONS}`,
+    ];
+    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        j.JOB_NAME                              AS job_name,
+        j.JOB_NUMBER                            AS job_number,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL       AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL       AS manager,
+        COUNT(*)                                AS total_items,
+        SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) AS deficient_items,
+        ROUND(
+          SUM(CASE WHEN li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1 THEN 1 ELSE 0 END) * 100.0 /
+          NULLIF(COUNT(*), 0)
+        , 1)                                    AS deficiency_pct
+      FROM ${prefix}.FACT_CHECKPOINT_LINEITEM li
+      JOIN ${prefix}.FACT_CHECKPOINT c ON li.CHECKPOINT_KEY = c.CHECKPOINT_KEY
+      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY j.JOB_NAME, j.JOB_NUMBER, j.JOB_TIER_08_CURRENT_VALUE_LABEL, j.JOB_TIER_03_CURRENT_VALUE_LABEL
+      ORDER BY deficiency_pct DESC
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      sites: rows.map(r => ({
+        jobName:        r.job_name,
+        jobNumber:      r.job_number,
+        vp:             r.vp,
+        manager:        r.manager,
+        totalItems:     Number(r.total_items) || 0,
+        deficientItems: Number(r.deficient_items) || 0,
+        deficiencyPct:  Number(r.deficiency_pct) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace sites-by-deficiency error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:tenantId/days-since-inspection ────────────────────────────────────
+// Active sites not inspected in > 30 days, sorted by days since last inspection
+
+router.get('/:tenantId/days-since-inspection', async (req, res) => {
+  try {
+    const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
+    if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
+    const { vp, manager, jobNumber } = req.query;
+
+    const { connector, config } = await getConnector(req.supabase, tenantId);
+    const prefix = fq(config);
+    const binds = [config.company_filter];
+
+    const conditions = [
+      `j.JOB_COMPANY_NAME = :1`,
+      `c.IS_CHECKPOINT_COMPLETED_FLAG = 1`,
+      `c.CHECKPOINT_TEMPLATE_TYPE_LABEL = 'Inspection'`,
+      `j.IS_JOB_ACTIVE_FLAG = 1`,
+    ];
+    conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const sql = `
+      SELECT
+        j.JOB_NAME                              AS job_name,
+        j.JOB_NUMBER                            AS job_number,
+        j.JOB_TIER_08_CURRENT_VALUE_LABEL       AS vp,
+        j.JOB_TIER_03_CURRENT_VALUE_LABEL       AS manager,
+        MAX(d.CALENDAR_DATE)                    AS last_inspection_date,
+        DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) AS days_since
+      FROM ${prefix}.FACT_CHECKPOINT c
+      JOIN ${prefix}.DIM_DATE d ON c.CHECKPOINT_PERFORMED_DATE_KEY = d.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j ON c.JOB_KEY = j.JOB_KEY
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY j.JOB_NAME, j.JOB_NUMBER,
+               j.JOB_TIER_08_CURRENT_VALUE_LABEL,
+               j.JOB_TIER_03_CURRENT_VALUE_LABEL
+      HAVING DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) > 30
+      ORDER BY days_since DESC
+      LIMIT 20
+    `;
+
+    const rows = await connector.queryView(sql, binds);
+
+    res.json({
+      sites: rows.map(r => ({
+        jobName:            r.job_name,
+        jobNumber:          r.job_number,
+        vp:                 r.vp,
+        manager:            r.manager,
+        lastInspectionDate: r.last_inspection_date,
+        daysSince:          Number(r.days_since) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('ops-workspace days-since-inspection error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
