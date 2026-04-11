@@ -125,16 +125,28 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
         COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
               IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_KEY END)                          AS safety_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
-              IN ('Safety Inspection', 'Safety Inspection old')
-              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS safety_pct,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                IN ('Safety Inspection', 'Safety Inspection old')
+                AND c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+                THEN c.CHECKPOINT_KEY END) * 100.0 /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                IN ('Safety Inspection', 'Safety Inspection old')
+                THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS safety_pass_rate,
 
         COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
               NOT IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_KEY END)                          AS commercial_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
-              NOT IN ('Safety Inspection', 'Safety Inspection old')
-              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS commercial_pct,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                NOT IN ('Safety Inspection', 'Safety Inspection old')
+                AND c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+                THEN c.CHECKPOINT_KEY END) * 100.0 /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                NOT IN ('Safety Inspection', 'Safety Inspection old')
+                THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS inspection_pass_rate,
 
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)                AS total_deficiencies,
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_OPEN_QUANTITY)           AS open_deficiencies,
@@ -163,9 +175,9 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       vp:                  r.vp,
       jobCount:            Number(r.job_count) || 0,
       safetyInspCount:     Number(r.safety_insp_count) || 0,
-      safetyPct:           r.safety_pct != null ? Number(r.safety_pct) : null,
+      safetyPassRate:      r.safety_pass_rate != null ? Number(r.safety_pass_rate) : null,
       commercialInspCount: Number(r.commercial_insp_count) || 0,
-      inspectionScore:     r.commercial_pct != null ? Number(r.commercial_pct) : null,
+      inspectionPassRate:  r.inspection_pass_rate != null ? Number(r.inspection_pass_rate) : null,
       totalDeficiencies:   Number(r.total_deficiencies) || 0,
       openDeficiencies:    Number(r.open_deficiencies) || 0,
       closedDeficiencies:  Number(r.closed_deficiencies) || 0,
@@ -216,16 +228,28 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
         COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
               IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_KEY END)                          AS safety_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
-              IN ('Safety Inspection', 'Safety Inspection old')
-              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS safety_pct,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                IN ('Safety Inspection', 'Safety Inspection old')
+                AND c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+                THEN c.CHECKPOINT_KEY END) * 100.0 /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                IN ('Safety Inspection', 'Safety Inspection old')
+                THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS safety_pass_rate,
 
         COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
               NOT IN ('Safety Inspection', 'Safety Inspection old')
               THEN c.CHECKPOINT_KEY END)                          AS commercial_insp_count,
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
-              NOT IN ('Safety Inspection', 'Safety Inspection old')
-              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS commercial_pct,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                NOT IN ('Safety Inspection', 'Safety Inspection old')
+                AND c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+                THEN c.CHECKPOINT_KEY END) * 100.0 /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                NOT IN ('Safety Inspection', 'Safety Inspection old')
+                THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS inspection_pass_rate,
 
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)                AS total_deficiencies,
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_OPEN_QUANTITY)           AS open_deficiencies,
@@ -253,9 +277,9 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
       region:              r.region,
       jobCount:            Number(r.job_count) || 0,
       safetyInspCount:     Number(r.safety_insp_count) || 0,
-      safetyPct:           r.safety_pct != null ? Number(r.safety_pct) : null,
+      safetyPassRate:      r.safety_pass_rate != null ? Number(r.safety_pass_rate) : null,
       commercialInspCount: Number(r.commercial_insp_count) || 0,
-      inspectionScore:     r.commercial_pct != null ? Number(r.commercial_pct) : null,
+      inspectionPassRate:  r.inspection_pass_rate != null ? Number(r.inspection_pass_rate) : null,
       totalDeficiencies:   Number(r.total_deficiencies) || 0,
       openDeficiencies:    Number(r.open_deficiencies) || 0,
       sitesBelowObjective: Number(r.sites_below_objective) || 0,
@@ -432,6 +456,8 @@ router.get('/:tenantId/quality-kpis', async (req, res) => {
       SELECT
         ROUND(AVG(c.CHECKPOINT_SCORE_PERCENT), 1)              AS avg_score,
         COUNT(DISTINCT c.CHECKPOINT_ID)                        AS total_inspections,
+        COUNT(DISTINCT CASE WHEN c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+              THEN c.CHECKPOINT_ID END)                        AS passed_inspections,
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_OPEN_QUANTITY)         AS open_deficiencies,
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)              AS total_deficiencies,
         COUNT(DISTINCT CASE WHEN c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 1
@@ -447,9 +473,14 @@ router.get('/:tenantId/quality-kpis', async (req, res) => {
     const rows = await connector.queryView(sql, binds);
     const r = rows[0] || {};
 
+    const totalInsp  = Number(r.total_inspections) || 0;
+    const passedInsp = Number(r.passed_inspections) || 0;
+
     res.json({
       avgScore:                Number(r.avg_score)                  || 0,
-      totalInspections:        Number(r.total_inspections)          || 0,
+      totalInspections:        totalInsp,
+      passedInspections:       passedInsp,
+      passRate:                totalInsp > 0 ? Math.round((passedInsp / totalInsp) * 1000) / 10 : 0,
       openDeficiencies:        Number(r.open_deficiencies)          || 0,
       totalDeficiencies:       Number(r.total_deficiencies)         || 0,
       sitesBelowObjective:    Number(r.sites_below_objective)      || 0,
@@ -583,13 +614,31 @@ router.get('/:tenantId/manager-sites', async (req, res) => {
         j.JOB_TIER_03_CURRENT_VALUE_LABEL                        AS manager,
         COUNT(DISTINCT c.CHECKPOINT_KEY)                          AS total_inspections,
 
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
               IN ('Safety Inspection', 'Safety Inspection old')
-              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS safety_pct,
+              THEN c.CHECKPOINT_KEY END)                          AS safety_insp_count,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                IN ('Safety Inspection', 'Safety Inspection old')
+                AND c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+                THEN c.CHECKPOINT_KEY END) * 100.0 /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                IN ('Safety Inspection', 'Safety Inspection old')
+                THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS safety_pass_rate,
 
-        ROUND(AVG(CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+        COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
               NOT IN ('Safety Inspection', 'Safety Inspection old')
-              THEN c.CHECKPOINT_SCORE_PERCENT END), 1)            AS inspection_score,
+              THEN c.CHECKPOINT_KEY END)                          AS commercial_insp_count,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                NOT IN ('Safety Inspection', 'Safety Inspection old')
+                AND c.IS_CHECKPOINT_SCORE_BELOW_OBJECTIVE_FLAG = 0
+                THEN c.CHECKPOINT_KEY END) * 100.0 /
+          NULLIF(COUNT(DISTINCT CASE WHEN c.CHECKPOINT_TEMPLATE_DESCRIPTION
+                NOT IN ('Safety Inspection', 'Safety Inspection old')
+                THEN c.CHECKPOINT_KEY END), 0)
+        , 1)                                                      AS inspection_pass_rate,
 
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_QUANTITY)                AS total_deficiencies,
         SUM(c.CHECKPOINT_DEFICIENT_ITEM_OPEN_QUANTITY)           AS open_deficiencies,
@@ -612,16 +661,18 @@ router.get('/:tenantId/manager-sites', async (req, res) => {
 
     res.json({
       rows: rows.map(r => ({
-        jobName:          r.job_name,
-        jobNumber:        r.job_number,
-        vp:               r.vp,
-        manager:          r.manager,
-        totalInspections: Number(r.total_inspections) || 0,
-        safetyPct:        r.safety_pct != null ? Number(r.safety_pct) : null,
-        inspectionScore:  r.inspection_score != null ? Number(r.inspection_score) : null,
-        totalDeficiencies: Number(r.total_deficiencies) || 0,
-        openDeficiencies: Number(r.open_deficiencies) || 0,
-        avgCloseDays:     r.avg_close_days != null ? Number(r.avg_close_days) : null,
+        jobName:            r.job_name,
+        jobNumber:          r.job_number,
+        vp:                 r.vp,
+        manager:            r.manager,
+        totalInspections:   Number(r.total_inspections) || 0,
+        safetyInspCount:    Number(r.safety_insp_count) || 0,
+        safetyPassRate:     r.safety_pass_rate != null ? Number(r.safety_pass_rate) : null,
+        commercialInspCount: Number(r.commercial_insp_count) || 0,
+        inspectionPassRate: r.inspection_pass_rate != null ? Number(r.inspection_pass_rate) : null,
+        totalDeficiencies:  Number(r.total_deficiencies) || 0,
+        openDeficiencies:   Number(r.open_deficiencies) || 0,
+        avgCloseDays:       r.avg_close_days != null ? Number(r.avg_close_days) : null,
       })),
     });
   } catch (err) {
@@ -636,19 +687,19 @@ router.get('/:tenantId/site-deficiencies', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { jobNumber, startDate, endDate } = req.query;
+    const { jobNumber } = req.query;
     if (!jobNumber) return res.status(400).json({ error: 'jobNumber param required' });
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
     const binds = [config.company_filter, jobNumber];
 
+    // No date filter — always show all deficiencies for the site
     const conditions = [
       `j.JOB_COMPANY_NAME = :1`,
       `li.IS_CHECKPOINT_ITEM_DEFICIENT_FLAG = 1`,
       `j.JOB_NUMBER = :2`,
     ];
-    conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
 
     const sql = `
       SELECT
