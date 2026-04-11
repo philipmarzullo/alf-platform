@@ -117,7 +117,7 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
     conditions.push(...addDateFilters('d.CALENDAR_DATE', { startDate, endDate }, binds));
     conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
 
-    const sql = `
+    const inspSql = `
       SELECT
         j.JOB_TIER_08_CURRENT_VALUE_LABEL                        AS vp,
         COUNT(DISTINCT c.JOB_KEY)                                AS job_count,
@@ -183,9 +183,49 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       ORDER BY vp
     `;
 
-    const rows = await connector.queryView(sql, binds);
+    // Payroll per VP (separate fact table — parallel query)
+    const payBinds = [config.company_filter];
+    const payCond = [`j2.JOB_COMPANY_NAME = :1`, `j2.JOB_TIER_08_CURRENT_VALUE_LABEL IS NOT NULL`];
+    payCond.push(...addDateFilters('d2.CALENDAR_DATE', { startDate, endDate }, payBinds));
+    payCond.push(...addJobTierFilters('j2', { vp, manager, jobNumber }, payBinds));
 
-    const result = rows.map(r => ({
+    const payrollSql = `
+      SELECT
+        j2.JOB_TIER_08_CURRENT_VALUE_LABEL AS vp,
+        ROUND(SUM(t.TIMEKEEPING_TOTAL_DOLLAR_AMOUNT), 0) AS payroll_total
+      FROM ${prefix}.FACT_TIMEKEEPING t
+      JOIN ${prefix}.DIM_DATE d2 ON t.WORK_DATE_KEY = d2.DATE_KEY
+      JOIN ${prefix}.DIM_JOB j2 ON t.JOB_KEY = j2.JOB_KEY
+      WHERE ${payCond.join(' AND ')}
+      GROUP BY j2.JOB_TIER_08_CURRENT_VALUE_LABEL
+    `;
+
+    // Claims per VP (from Supabase wc_claims)
+    const { data: claims } = await req.supabase
+      .from('wc_claims')
+      .select('vp, claim_status')
+      .eq('tenant_id', tenantId);
+    const claimsByVp = {};
+    for (const c of (claims || [])) {
+      if (startDate && (!c.date_of_loss || c.date_of_loss < startDate)) continue;
+      if (endDate && (!c.date_of_loss || c.date_of_loss > endDate)) continue;
+      if (c.claim_status === 'Open') {
+        claimsByVp[c.vp] = (claimsByVp[c.vp] || 0) + 1;
+      }
+    }
+
+    const [inspRows, payRows] = await Promise.all([
+      connector.queryView(inspSql, binds),
+      connector.queryView(payrollSql, payBinds),
+    ]);
+
+    // Build payroll lookup
+    const payLookup = {};
+    for (const r of payRows) {
+      payLookup[r.vp] = Math.round(Number(r.payroll_total) || 0);
+    }
+
+    const result = inspRows.map(r => ({
       vp:                  r.vp,
       jobCount:            Number(r.job_count) || 0,
       safetyInspCount:     Number(r.safety_insp_count) || 0,
@@ -200,10 +240,8 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       closedDeficiencies:  Number(r.closed_deficiencies) || 0,
       sitesBelowObjective: Number(r.sites_below_objective) || 0,
       avgCloseDays:        r.avg_close_days != null ? Number(r.avg_close_days) : null,
-      // Pending data share expansion
-      incidents:   null,
-      goodSaves:   null,
-      compliments: null,
+      payroll:             payLookup[r.vp] || 0,
+      claims:              claimsByVp[r.vp] || 0,
     }));
 
     res.json({ rows: result });
@@ -575,13 +613,31 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       WHERE ${budCond.join(' AND ')}
     `;
 
-    const [payRows, budRows] = await Promise.all([
+    // Budget last updated (only when a specific job is selected)
+    let budgetLastUpdatedPromise = Promise.resolve([]);
+    if (jobNumber && jobNumber !== 'all') {
+      const bluBinds = [config.company_filter, jobNumber];
+      const bluSql = `
+        SELECT MAX(d.CALENDAR_DATE) AS last_budget_date
+        FROM ${prefix}.FACT_LABOR_BUDGET_TO_ACTUAL l
+        JOIN ${prefix}.DIM_DATE d ON l.DATE_KEY = d.DATE_KEY
+        JOIN ${prefix}.DIM_JOB j ON l.JOB_KEY = j.JOB_KEY
+        WHERE j.JOB_COMPANY_NAME = :1
+          AND j.JOB_NUMBER = :2
+          AND l.BUDGET_DOLLAR_AMOUNT > 0
+      `;
+      budgetLastUpdatedPromise = connector.queryView(bluSql, bluBinds);
+    }
+
+    const [payRows, budRows, bluRows] = await Promise.all([
       connector.queryView(payrollSql, payBinds),
       connector.queryView(budgetSql, budBinds),
+      budgetLastUpdatedPromise,
     ]);
 
     const p = payRows[0] || {};
     const b = budRows[0] || {};
+    const blu = bluRows[0] || {};
 
     const totalPayroll   = Math.round(Number(p.total_dollars) || 0);
     const regularPay     = Math.round(Number(p.regular_dollars) || 0);
@@ -611,6 +667,7 @@ router.get('/:tenantId/financial-kpis', async (req, res) => {
       laborVariancePct,
       hasBudgetData,
       hasPayrollData: totalPayroll > 0 || totalHours > 0,
+      budgetLastUpdated: blu.last_budget_date || null,
     });
   } catch (err) {
     console.error('ops-workspace financial-kpis error:', err);
@@ -1057,7 +1114,7 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { vp, manager, jobNumber } = req.query;
+    const { vp, manager, jobNumber, activeOnly = 'true' } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
@@ -1070,6 +1127,10 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
       `j.IS_JOB_ACTIVE_FLAG = 1`,
     ];
     conditions.push(...addJobTierFilters('j', { vp, manager, jobNumber }, binds));
+
+    const activeFilter = activeOnly !== 'false'
+      ? `AND DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) <= 730`
+      : '';
 
     const sql = `
       SELECT
@@ -1087,8 +1148,8 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
                j.JOB_TIER_08_CURRENT_VALUE_LABEL,
                j.JOB_TIER_03_CURRENT_VALUE_LABEL
       HAVING DATEDIFF('day', MAX(d.CALENDAR_DATE), CURRENT_DATE()) > 30
+        ${activeFilter}
       ORDER BY days_since DESC
-      LIMIT 20
     `;
 
     const rows = await connector.queryView(sql, binds);
