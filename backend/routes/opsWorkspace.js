@@ -258,6 +258,13 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       standardBelowObjPct:   r.standard_below_obj_pct != null ? Number(r.standard_below_obj_pct) : null,
       tieredInspCount:       Number(r.tiered_insp_count) || 0,
       tieredAvgScore:        r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null,
+      qualityInspType:       (Number(r.standard_insp_count) || 0) > 0 ? 'standard'
+                             : (Number(r.tiered_insp_count) || 0) > 0 ? 'tiered' : 'none',
+      qualityInspCount:      (Number(r.standard_insp_count) || 0) > 0
+                             ? Number(r.standard_insp_count) : Number(r.tiered_insp_count) || 0,
+      qualityAvgScore:       (Number(r.standard_insp_count) || 0) > 0
+                             ? (r.standard_avg_score != null ? Number(r.standard_avg_score) : null)
+                             : (r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null),
       totalDeficiencies:   Number(r.total_deficiencies) || 0,
       openDeficiencies:    Number(r.open_deficiencies) || 0,
       closedDeficiencies:  Number(r.closed_deficiencies) || 0,
@@ -376,6 +383,13 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
       standardBelowObjPct:   r.standard_below_obj_pct != null ? Number(r.standard_below_obj_pct) : null,
       tieredInspCount:       Number(r.tiered_insp_count) || 0,
       tieredAvgScore:        r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null,
+      qualityInspType:       (Number(r.standard_insp_count) || 0) > 0 ? 'standard'
+                             : (Number(r.tiered_insp_count) || 0) > 0 ? 'tiered' : 'none',
+      qualityInspCount:      (Number(r.standard_insp_count) || 0) > 0
+                             ? Number(r.standard_insp_count) : Number(r.tiered_insp_count) || 0,
+      qualityAvgScore:       (Number(r.standard_insp_count) || 0) > 0
+                             ? (r.standard_avg_score != null ? Number(r.standard_avg_score) : null)
+                             : (r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null),
       totalDeficiencies:   Number(r.total_deficiencies) || 0,
       openDeficiencies:    Number(r.open_deficiencies) || 0,
       sitesBelowObjective: Number(r.sites_below_objective) || 0,
