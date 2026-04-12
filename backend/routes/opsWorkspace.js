@@ -482,10 +482,27 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
 
     const absenceSql = `
       SELECT
-        COUNT(DISTINCT CASE WHEN a.IS_ABSENT_UNEXCUSED_FLAG = 1
-              THEN a.EMPLOYEE_KEY END)          AS unexcused_absences,
-        COUNT(DISTINCT a.EMPLOYEE_KEY)          AS employees_with_absences,
-        SUM(a.ABSENCE_TOTAL_HOURS)              AS total_absence_hours
+        COUNT(DISTINCT a.EMPLOYEE_KEY) AS employees_with_absences,
+
+        SUM(CASE WHEN a.ABSENCE_REASON_LABEL IN (
+          'Vacation','Floating Holiday','Personal Day','Birthday'
+        ) THEN 1 ELSE 0 END) AS pto_count,
+        SUM(CASE WHEN a.ABSENCE_REASON_LABEL IN (
+          'Vacation','Floating Holiday','Personal Day','Birthday'
+        ) THEN a.ABSENCE_TOTAL_HOURS ELSE 0 END) AS pto_hours,
+
+        SUM(CASE WHEN a.ABSENCE_REASON_LABEL = 'Sick Day'
+          THEN 1 ELSE 0 END) AS sick_count,
+        SUM(CASE WHEN a.ABSENCE_REASON_LABEL = 'Sick Day'
+          THEN a.ABSENCE_TOTAL_HOURS ELSE 0 END) AS sick_hours,
+
+        SUM(CASE WHEN a.ABSENCE_REASON_LABEL NOT IN (
+          'Vacation','Floating Holiday','Personal Day','Birthday','Sick Day'
+        ) THEN 1 ELSE 0 END) AS other_absence_count,
+        SUM(CASE WHEN a.ABSENCE_REASON_LABEL NOT IN (
+          'Vacation','Floating Holiday','Personal Day','Birthday','Sick Day'
+        ) THEN a.ABSENCE_TOTAL_HOURS ELSE 0 END) AS other_absence_hours
+
       FROM ${prefix}.FACT_EMPLOYEE_ABSENCE a
       JOIN ${prefix}.DIM_JOB j ON a.JOB_KEY = j.JOB_KEY
       WHERE ${absCond.join(' AND ')}
@@ -516,8 +533,12 @@ router.get('/:tenantId/workforce-kpis', async (req, res) => {
       activeHeadcount:    Number(hc.active_headcount) || 0,
       turnoverRate:       totalEmployees ? Math.round((terminations / totalEmployees) * 100 * 10) / 10 : 0,
       overtimePct:        totalHours     ? Math.round((otHours / totalHours) * 100 * 10) / 10         : 0,
-      unexcusedAbsences:  Number(abs.unexcused_absences) || 0,
-      totalAbsenceHours:  Math.round(Number(abs.total_absence_hours) || 0),
+      ptoCount:            Number(abs.pto_count) || 0,
+      ptoHours:            Math.round(Number(abs.pto_hours) || 0),
+      sickCount:           Number(abs.sick_count) || 0,
+      sickHours:           Math.round(Number(abs.sick_hours) || 0),
+      otherAbsenceCount:   Number(abs.other_absence_count) || 0,
+      otherAbsenceHours:   Math.round(Number(abs.other_absence_hours) || 0),
       terminations,
       totalHours:         Math.round(totalHours),
       hasTurnoverData,
@@ -1233,19 +1254,30 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
 });
 
 // ─── GET /:tenantId/absence-detail ────────────────────────────────────────────
-// Detail list of unexcused absences for drill-through panel
+// Detail list of absences for drill-through panel
 
 router.get('/:tenantId/absence-detail', async (req, res) => {
   try {
     const tenantId = resolveEffectiveTenantId(req, req.params.tenantId);
     if (!tenantId) return res.status(400).json({ error: 'tenant_id required' });
-    const { startDate, endDate, vp, manager, jobName } = req.query;
+    const { startDate, endDate, vp, manager, jobName, absenceCategory } = req.query;
 
     const { connector, config } = await getConnector(req.supabase, tenantId);
     const prefix = fq(config);
     const binds = [config.company_filter];
 
-    const conditions = [`j.JOB_COMPANY_NAME = :1`, jobSuffixFilter('j'), `a.IS_ABSENT_UNEXCUSED_FLAG = 1`];
+    const PTO_REASONS = "('Vacation','Floating Holiday','Personal Day','Birthday')";
+    const SICK_REASONS = "('Sick Day')";
+
+    const conditions = [`j.JOB_COMPANY_NAME = :1`, jobSuffixFilter('j')];
+
+    if (absenceCategory === 'pto') {
+      conditions.push(`a.ABSENCE_REASON_LABEL IN ${PTO_REASONS}`);
+    } else if (absenceCategory === 'sick') {
+      conditions.push(`a.ABSENCE_REASON_LABEL IN ${SICK_REASONS}`);
+    } else if (absenceCategory === 'other') {
+      conditions.push(`a.ABSENCE_REASON_LABEL NOT IN ('Vacation','Floating Holiday','Personal Day','Birthday','Sick Day')`);
+    }
     if (startDate) { binds.push(startDate); conditions.push(`a.ABSENCE_DATE >= :${binds.length}`); }
     if (endDate)   { binds.push(endDate);   conditions.push(`a.ABSENCE_DATE <= :${binds.length}`); }
     conditions.push(...addJobTierFilters('j', { vp, manager, jobName },binds));
