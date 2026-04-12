@@ -260,8 +260,7 @@ router.get('/:tenantId/vp-summary', async (req, res) => {
       tieredAvgScore:        r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null,
       qualityInspType:       (Number(r.standard_insp_count) || 0) > 0 ? 'standard'
                              : (Number(r.tiered_insp_count) || 0) > 0 ? 'tiered' : 'none',
-      qualityInspCount:      (Number(r.standard_insp_count) || 0) > 0
-                             ? Number(r.standard_insp_count) : Number(r.tiered_insp_count) || 0,
+      qualityInspCount:      (Number(r.standard_insp_count) || 0) + (Number(r.tiered_insp_count) || 0),
       qualityAvgScore:       (Number(r.standard_insp_count) || 0) > 0
                              ? (r.standard_avg_score != null ? Number(r.standard_avg_score) : null)
                              : (r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null),
@@ -385,8 +384,7 @@ router.get('/:tenantId/manager-summary', async (req, res) => {
       tieredAvgScore:        r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null,
       qualityInspType:       (Number(r.standard_insp_count) || 0) > 0 ? 'standard'
                              : (Number(r.tiered_insp_count) || 0) > 0 ? 'tiered' : 'none',
-      qualityInspCount:      (Number(r.standard_insp_count) || 0) > 0
-                             ? Number(r.standard_insp_count) : Number(r.tiered_insp_count) || 0,
+      qualityInspCount:      (Number(r.standard_insp_count) || 0) + (Number(r.tiered_insp_count) || 0),
       qualityAvgScore:       (Number(r.standard_insp_count) || 0) > 0
                              ? (r.standard_avg_score != null ? Number(r.standard_avg_score) : null)
                              : (r.tiered_avg_score != null ? Number(r.tiered_avg_score) : null),
