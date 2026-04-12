@@ -1207,7 +1207,7 @@ router.get('/:tenantId/days-since-inspection', async (req, res) => {
                j.JOB_TIER_08_CURRENT_VALUE_LABEL,
                j.JOB_TIER_03_CURRENT_VALUE_LABEL
       ${havingClause}
-      ORDER BY days_since DESC
+      ORDER BY days_since ASC
     `;
 
     const rows = await connector.queryView(sql, binds);
