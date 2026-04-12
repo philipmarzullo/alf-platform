@@ -15,6 +15,9 @@ const INSPECTION_EXCLUSIONS = `(
   'Byte Dance Daily/Nightly Report','Honda Employee Use Only','CIMS Self-Audit'
 )`;
 
+// Non-person values that appear in JOB_TIER_03 (Manager tier) on inactive/closed jobs
+const MANAGER_EXCLUSIONS = ['Closed', 'TBD', 'Vacant', 'N/A', ''];
+
 function resolveEffectiveTenantId(req, paramTenantId) {
   if (PLATFORM_ROLES.includes(req.user?.role)) {
     return paramTenantId || req.tenantId;
@@ -63,6 +66,7 @@ router.get('/:tenantId/filter-options', async (req, res) => {
       FROM ${prefix}.DIM_JOB j
       WHERE j.JOB_COMPANY_NAME = :1
         AND ${jobSuffixFilter('j')}
+        AND j.IS_JOB_ACTIVE_FLAG = 1
         AND j.JOB_TIER_08_CURRENT_VALUE_LABEL IS NOT NULL
         AND j.JOB_TIER_08_CURRENT_VALUE_LABEL != ''
       ORDER BY vp, manager, job_name
@@ -72,7 +76,7 @@ router.get('/:tenantId/filter-options', async (req, res) => {
 
     const vps = [...new Set(rows.map(r => r.vp).filter(Boolean))].sort();
     const managers = rows
-      .filter(r => r.manager)
+      .filter(r => r.manager && !MANAGER_EXCLUSIONS.includes(r.manager))
       .map(r => ({ manager: r.manager, vp: r.vp }));
     // Deduplicate managers
     const managersSeen = new Set();
